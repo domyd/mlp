@@ -9,7 +9,11 @@ pub struct MlpIterator<R: Read> {
 }
 
 impl<'a, R: Read> MlpIterator<R> {
-    pub fn new(reader: R, segment: u16) -> MlpIterator<R> {
+    pub fn new(reader: R) -> MlpIterator<R> {
+        MlpIterator::with_segment(reader, 0)
+    }
+
+    pub fn with_segment(reader: R, segment: u16) -> MlpIterator<R> {
         let buffer: Vec<u8> = vec![0; 4096];
         MlpIterator {
             buffer,
@@ -85,7 +89,7 @@ fn iter_test_single() {
 #[test]
 fn iter_test_none() {
     let data: &[u8] = &[];
-    let iterator = MlpIterator::new(data, 0);
+    let iterator = MlpIterator::new(data);
     let num_frames = iterator.count();
     assert_eq!(0, num_frames);
 }
@@ -93,7 +97,7 @@ fn iter_test_none() {
 #[test]
 fn iter_test_partial() {
     let data: &[u8] = include_bytes!("../../assets/frozen2-segment55-frame1.bin");
-    let iterator = MlpIterator::new(&data[..500], 0);
+    let iterator = MlpIterator::new(&data[..500]);
     let num_frames = iterator.count();
     assert_eq!(0, num_frames);
 }
@@ -109,6 +113,6 @@ fn get_iter<P: AsRef<std::path::Path>>(relative_path: P) -> MlpIterator<std::io:
     
     let file = std::fs::File::open(path).unwrap();
     let reader = std::io::BufReader::new(file);
-    let iterator = MlpIterator::new(reader, 0);
+    let iterator = MlpIterator::new(reader);
     iterator
 }
