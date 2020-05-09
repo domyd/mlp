@@ -1,9 +1,12 @@
-use std::fs::File;
-use std::{path::{PathBuf, Path}, io::{BufReader, Write, BufWriter}};
-use clap::{Arg, App};
+use clap::{App, Arg};
 use itertools::Itertools;
-use mlp::{MlpIterator, MlpFrame, MlpFrameReader};
+use mlp::{MlpFrame, MlpFrameReader, MlpIterator};
 use num_format::{Locale, ToFormattedString};
+use std::fs::File;
+use std::{
+    io::{BufReader, BufWriter, Write},
+    path::{Path, PathBuf},
+};
 pub mod mlp;
 
 fn main() -> std::io::Result<()> {
@@ -31,17 +34,21 @@ fn main() -> std::io::Result<()> {
     match args.subcommand() {
         ("append", Some(sub)) => {
             let out_file_str: &str = sub.value_of("OUTPUT").unwrap();
-            let out_file = File::create(out_file_str).expect(format!("Failed to create file '{0}'.", out_file_str).as_ref());
+            let out_file = File::create(out_file_str)
+                .expect(format!("Failed to create file '{0}'.", out_file_str).as_ref());
 
             let src_dir_str: &str = sub.value_of("source").unwrap();
             let src_dir_buf = PathBuf::from(src_dir_str);
 
-            let map_values: Result<Vec<u16>, _> = sub.values_of("map").unwrap()
+            let map_values: Result<Vec<u16>, _> = sub
+                .values_of("map")
+                .unwrap()
                 .map(|s| s.parse::<u16>())
                 .collect();
             let segments = map_values.expect("some segments in the map aren't numbers.");
 
-            let frames: Vec<MlpFrame> = segments.iter()
+            let frames: Vec<MlpFrame> = segments
+                .iter()
                 .flat_map(|s| {
                     let path = get_path_for_segment(*s, src_dir_buf.as_path());
                     let file = File::open(path).unwrap();
@@ -53,13 +60,13 @@ fn main() -> std::io::Result<()> {
             write_mlp_frames(&frames, src_dir_buf.as_path(), &mut out_file_writer)?;
 
             Ok(())
-        },
-        ("info", Some(sub)) => { 
+        }
+        ("info", Some(sub)) => {
             let path = PathBuf::from(sub.value_of("stream").unwrap());
             print_stream_info(path.as_path())?;
             Ok(())
-        },
-        _ => Ok(())
+        }
+        _ => Ok(()),
     }
 }
 
@@ -76,18 +83,34 @@ fn print_stream_info(filepath: &Path) -> std::io::Result<()> {
     }
 
     let duration = (num_frames * 40) as f64 / 48000_f64;
-    
+
     println!("Assuming 48 KHz sampling frequency and 40 samples per frame.");
-    println!("Total MLP frame count:   {0}", num_frames.to_formatted_string(&Locale::en));
-    println!("  Major frames:          {0}", num_major_frames.to_formatted_string(&Locale::en));
-    println!("  Minor frames:          {0}", (num_frames - num_major_frames).to_formatted_string(&Locale::en));
-    println!("Number of audio samples: {0}", (num_frames * 40).to_formatted_string(&Locale::en));
-    println!("Duration:                {:.7} seconds", duration);
+    println!(
+        "Total MLP frame count: {:>14}",
+        num_frames.to_formatted_string(&Locale::en)
+    );
+    println!(
+        "  Major frames: {:>21}",
+        num_major_frames.to_formatted_string(&Locale::en)
+    );
+    println!(
+        "  Minor frames: {:>21}",
+        (num_frames - num_major_frames).to_formatted_string(&Locale::en)
+    );
+    println!(
+        "Number of audio samples: {:>12}",
+        (num_frames * 40).to_formatted_string(&Locale::en)
+    );
+    println!("Duration: {:>35.7} seconds", duration);
 
     Ok(())
 }
 
-fn write_mlp_frames<W: Write>(frames: &[MlpFrame], src_dir: &Path, writer: &mut W) -> std::io::Result<()> {
+fn write_mlp_frames<W: Write>(
+    frames: &[MlpFrame],
+    src_dir: &Path,
+    writer: &mut W,
+) -> std::io::Result<()> {
     let mut frames_by_segment: Vec<(u16, Vec<&MlpFrame>)> = Vec::new();
     for (key, group) in &frames.into_iter().group_by(|f| f.segment) {
         frames_by_segment.push((key, group.collect()));

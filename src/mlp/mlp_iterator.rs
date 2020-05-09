@@ -1,11 +1,11 @@
-use std::{io::{Read}, convert::TryInto};
 use super::MlpFrame;
+use std::{convert::TryInto, io::Read};
 
 pub struct MlpIterator<R: Read> {
     buffer: Vec<u8>,
     reader: R,
     segment: u16,
-    offset: usize
+    offset: usize,
 }
 
 impl<'a, R: Read> MlpIterator<R> {
@@ -19,7 +19,7 @@ impl<'a, R: Read> MlpIterator<R> {
             buffer,
             reader,
             segment,
-            offset: 0
+            offset: 0,
         }
     }
 }
@@ -36,7 +36,12 @@ impl<R: Read> Iterator for MlpIterator<R> {
         let au_bytes = [(self.buffer[0] & 0x0f), self.buffer[1]];
         let access_unit_length = u16::from_be_bytes(au_bytes) * 2;
         let input_timing = u16::from_be_bytes([self.buffer[2], self.buffer[3]]);
-        let has_major_sync = u32::from_be_bytes([self.buffer[4], self.buffer[5], self.buffer[6], self.buffer[7]]) == 0xf8726fba;
+        let has_major_sync = u32::from_be_bytes([
+            self.buffer[4],
+            self.buffer[5],
+            self.buffer[6],
+            self.buffer[7],
+        ]) == 0xf8726fba;
 
         let au_len: usize = access_unit_length.try_into().unwrap();
 
@@ -53,12 +58,12 @@ impl<R: Read> Iterator for MlpIterator<R> {
                     offset: self.offset,
                     length: au_len,
                     input_timing,
-                    has_major_sync
+                    has_major_sync,
                 };
                 self.offset += au_len;
                 Some(frame)
-            },
-            Err(_) => None
+            }
+            Err(_) => None,
         }
     }
 }
@@ -103,14 +108,16 @@ fn iter_test_partial() {
 }
 
 #[cfg(test)]
-fn get_iter<P: AsRef<std::path::Path>>(relative_path: P) -> MlpIterator<std::io::BufReader<std::fs::File>> {
+fn get_iter<P: AsRef<std::path::Path>>(
+    relative_path: P,
+) -> MlpIterator<std::io::BufReader<std::fs::File>> {
     let path: std::path::PathBuf = {
         let dir = env!("CARGO_MANIFEST_DIR");
         let mut path_buf = std::path::PathBuf::from(dir);
         path_buf.push(relative_path);
         path_buf
     };
-    
+
     let file = std::fs::File::open(path).unwrap();
     let reader = std::io::BufReader::new(file);
     let iterator = MlpIterator::new(reader);

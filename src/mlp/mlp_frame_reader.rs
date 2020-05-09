@@ -4,15 +4,18 @@ use std::io::{Read, Seek, SeekFrom};
 pub struct MlpFrameReader<'frame, 'reader, R: Read + Seek> {
     frame: &'frame MlpFrame,
     bytes_read: usize,
-    reader: &'reader mut R
+    reader: &'reader mut R,
 }
 
 impl<'frame, 'reader, R: Read + Seek> MlpFrameReader<'frame, 'reader, R> {
-    pub fn new(frame: &'frame MlpFrame, reader: &'reader mut R) -> MlpFrameReader<'frame, 'reader, R> {
+    pub fn new(
+        frame: &'frame MlpFrame,
+        reader: &'reader mut R,
+    ) -> MlpFrameReader<'frame, 'reader, R> {
         MlpFrameReader {
             frame,
             bytes_read: 0,
-            reader
+            reader,
         }
     }
 }
