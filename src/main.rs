@@ -7,6 +7,7 @@ use std::{
     io::{BufReader, BufWriter, Write},
     path::{Path, PathBuf},
 };
+pub mod libav;
 pub mod mlp;
 
 fn main() -> std::io::Result<()> {
@@ -29,6 +30,7 @@ fn main() -> std::io::Result<()> {
         .subcommand(App::new("info")
             .about("Prints information about the TrueHD stream.")
             .arg("-s, --stream <FILE> 'The TrueHD stream.'"))
+        .subcommand(App::new("ff").arg("-i, --input <FILE>"))
         .get_matches();
 
     match args.subcommand() {
@@ -64,6 +66,12 @@ fn main() -> std::io::Result<()> {
         ("info", Some(sub)) => {
             let path = PathBuf::from(sub.value_of("stream").unwrap());
             print_stream_info(path.as_path())?;
+            Ok(())
+        }
+        ("ff", Some(sub)) => {
+            unsafe {
+                libav::count_video_frames(sub.value_of("input").unwrap());
+            }
             Ok(())
         }
         _ => Ok(()),
