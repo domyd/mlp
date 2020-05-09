@@ -28,35 +28,39 @@ fn main() -> std::io::Result<()> {
             .arg("-s, --stream <FILE> 'The TrueHD stream.'"))
         .get_matches();
 
-    if let Some(args) = args.subcommand_matches("info") {
-        let path = PathBuf::from(args.value_of("stream").unwrap());
-        print_stream_info(path.as_path())?;
-        return Ok(());
+    match args.subcommand() {
+        ("append", Some(sub)) => {
+            let out_file_str: &str = sub.value_of("OUTPUT").unwrap();
+            let out_file = File::create(out_file_str).expect(format!("Failed to create file '{0}'.", out_file_str).as_ref());
+
+            let src_dir_str: &str = sub.value_of("source").unwrap();
+            let src_dir_buf = PathBuf::from(src_dir_str);
+
+            let map_values: Result<Vec<u16>, _> = sub.values_of("map").unwrap()
+                .map(|s| s.parse::<u16>())
+                .collect();
+            let segments = map_values.expect("some segments in the map aren't numbers.");
+
+            let frames: Vec<MlpFrame> = segments.iter()
+                .flat_map(|s| {
+                    let path = get_path_for_segment(*s, src_dir_buf.as_path());
+                    let file = File::open(path).unwrap();
+                    MlpIterator::with_segment(BufReader::new(file), *s)
+                })
+                .collect();
+
+            let mut out_file_writer = BufWriter::new(out_file);
+            write_mlp_frames(&frames, src_dir_buf.as_path(), &mut out_file_writer)?;
+
+            Ok(())
+        },
+        ("info", Some(sub)) => { 
+            let path = PathBuf::from(sub.value_of("stream").unwrap());
+            print_stream_info(path.as_path())?;
+            Ok(())
+        },
+        _ => Ok(())
     }
-
-    let out_file_str: &str = args.value_of("OUTPUT").unwrap();
-    let out_file = File::create(out_file_str).expect(format!("Failed to create file '{0}'.", out_file_str).as_ref());
-
-    let src_dir_str: &str = args.value_of("source").unwrap();
-    let src_dir_buf = PathBuf::from(src_dir_str);
-
-    let map_values: Result<Vec<u16>, _> = args.values_of("map").unwrap()
-        .map(|s| s.parse::<u16>())
-        .collect();
-    let segments = map_values.expect("some segments in the map aren't numbers.");
-
-    let frames: Vec<MlpFrame> = segments.iter()
-        .flat_map(|s| {
-            let path = get_path_for_segment(*s, src_dir_buf.as_path());
-            let file = File::open(path).unwrap();
-            MlpIterator::with_segment(BufReader::new(file), *s)
-        })
-        .collect();
-
-    let mut out_file_writer = BufWriter::new(out_file);
-    write_mlp_frames(&frames, src_dir_buf.as_path(), &mut out_file_writer)?;
-
-    Ok(())
 }
 
 fn print_stream_info(filepath: &Path) -> std::io::Result<()> {
