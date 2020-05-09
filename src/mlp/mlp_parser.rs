@@ -59,6 +59,7 @@ enum MultichannelType {
 }
 
 #[derive(Debug, PartialEq)]
+#[allow(non_camel_case_types)]
 enum SamplingFrequency {
     k48,
     k96,
@@ -78,7 +79,7 @@ impl SamplingFrequency {
             SamplingFrequency::k44_1 => 44_100,
             SamplingFrequency::k88_2 => 88_200,
             SamplingFrequency::k176_4 => 176_400,
-            Unknown => 1
+            Unknown => 1,
         }
     }
 }
@@ -97,7 +98,7 @@ struct SyncHeader {
 struct ControlEnabled {
     two_ch: bool,
     six_ch: bool,
-    eight_ch: bool
+    eight_ch: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -107,7 +108,7 @@ struct DialNorm {
     // ranges between -1 LKFS and -31 LKFS
     six_ch: i8,
     // ranges between -1 LKFS and -31 LKFS
-    eight_ch: i8
+    eight_ch: i8,
 }
 
 #[derive(Debug, PartialEq)]
@@ -125,7 +126,7 @@ struct ChSourceFormat {
     // not sure what this is, default value is 0x00000b
     six_ch: u8,
     // not sure what this is, default value is 0x00000b
-    eight_ch: u8
+    eight_ch: u8,
 }
 
 #[derive(Debug, PartialEq)]
@@ -141,6 +142,19 @@ struct ChannelMeaning {
 #[derive(Debug, PartialEq)]
 struct ExtraChannelMeaning {
     length: u8,
+}
+
+struct Substream {
+    info: SubstreamInfo,
+    parity: Option<u8>,
+    crc: Option<u8>,
+}
+
+struct SubstreamInfo {
+    restart_nonexistent: bool,
+    crc_present: bool,
+    substream_end_ptr: u16,
+    extra_substream_word: Option<u16>,
 }
 
 // workaround: https://github.com/Geal/nom/issues/1036
@@ -230,7 +244,7 @@ fn dial_norm_adjust(raw: u8) -> i8 {
 }
 
 fn mix_level_adjust(raw: u8) -> u8 {
-    if raw >= 0 && raw < 64 {
+    if raw < 64 {
         raw + 70
     } else {
         panic!("mix_level value above 63 is illegal; got {}", raw)
@@ -245,14 +259,14 @@ fn channel_meaning(input: &[u8]) -> IResult<&[u8], ChannelMeaning> {
     let ctrl_enabled = ControlEnabled {
         two_ch: (ce >> 13) != 0,
         six_ch: (ce >> 14) != 0,
-        eight_ch: (ce >> 15) != 0
+        eight_ch: (ce >> 15) != 0,
     };
 
     // drc_start_up_gain
     let drc_start_up_gain = ((main_data >> 47) & 0x7F) as i8;
 
     let multi_ch_field = main_data >> 2;
-    
+
     // dial_norm
     let dial_norm = DialNorm {
         two_ch: dial_norm_adjust(((multi_ch_field >> 39) & 0x3F) as u8),
@@ -279,7 +293,7 @@ fn channel_meaning(input: &[u8]) -> IResult<&[u8], ChannelMeaning> {
         mix_level,
         source_format,
         drc_start_up_gain,
-        extra_channel_meaning: None
+        extra_channel_meaning: None,
     };
 
     let extra_present = (main_data & 0b1) != 0;
@@ -296,7 +310,7 @@ fn channel_meaning(input: &[u8]) -> IResult<&[u8], ChannelMeaning> {
 
         return Ok((rest, channel_meaning));
     }
-    
+
     Ok((rest, channel_meaning))
 }
 
@@ -370,7 +384,7 @@ fn format_info_test() {
 
 #[test]
 fn major_sync_info_test() {
-    let data = include_bytes!("../assets/frozen2-segment55-accessunit1.bin");
+    let data = include_bytes!("../../assets/frozen2-segment55-frame1.bin");
     let sl = &data[4..];
 
     dbg!(major_sync_info(sl).unwrap().1);
@@ -388,7 +402,7 @@ fn major_sync_info_test() {
 
 #[test]
 fn sync_header_test() {
-    let data = include_bytes!("../assets/frozen2-segment55-accessunit1.bin");
+    let data = include_bytes!("../../assets/frozen2-segment55-frame1.bin");
     let sl = &data[..];
 
     let header = sync_header(sl);
@@ -412,7 +426,7 @@ fn sync_header_test() {
                     peak_data_rate: 3546,
                     substreams: 4,
                     extended_substream_info: 1, // todo
-                    substream_info: 204, // todo
+                    substream_info: 204,        // todo
                     channel_meaning: ChannelMeaning {
                         ctrl_enabled: ControlEnabled {
                             two_ch: false,
@@ -443,8 +457,14 @@ fn sync_header_test() {
     );
 
     assert_eq!(
-        header.unwrap().1.major_sync_info.unwrap().peak_data_rate_bps(), 
-        10_638_000.0);
+        header
+            .unwrap()
+            .1
+            .major_sync_info
+            .unwrap()
+            .peak_data_rate_bps(),
+        10_638_000.0
+    );
 }
 
 #[test]
