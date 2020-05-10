@@ -69,8 +69,14 @@ fn main() -> std::io::Result<()> {
             Ok(())
         }
         ("ff", Some(sub)) => {
-            unsafe {
-                libav::count_video_frames(sub.value_of("input").unwrap());
+            println!("Counting frames ...");
+            match unsafe { libav::count_video_frames(sub.value_of("input").unwrap()) } {
+                Some(i) => {
+                    println!("Counted {} frames.", i);
+                }
+                None => {
+                    println!("Couldn't count frames.");
+                }
             }
             Ok(())
         }
