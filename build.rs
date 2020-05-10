@@ -1,5 +1,5 @@
 use fs_extra;
-use std::fs::{remove_dir_all, remove_file, File};
+use std::fs::{read_dir, remove_dir_all, remove_file, File};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -9,12 +9,25 @@ fn main() {
 
     let ffmpeg_version = "4.2.2";
     let out_dir = std::env::var("OUT_DIR").unwrap();
-
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let out_path = PathBuf::from(&out_dir);
+
+    let mut header_files: Vec<PathBuf> = vec![];
+    let incl_path: PathBuf = [&manifest_dir, "external", "ffmpeg", "include"]
+        .iter()
+        .collect();
+    visit_dirs(incl_path.as_path(), &mut header_files).unwrap();
+
+    for relative_header_path in header_files
+        .iter()
+        .flat_map(|h| h.strip_prefix(&manifest_dir))
+        .flat_map(|p| p.to_str())
+    {
+        println!("cargo:rerun-if-changed={}", relative_header_path);
+    }
 
     let bin_dir = out_path.as_path().join("bin");
     let lib_dir = out_path.as_path().join("lib");
-    let include_dir = out_path.as_path().join("include");
 
     if !is_target_state(&out_path) {
         let ff_dev_dl = download_ffmpeg(&out_dir, "dev", ffmpeg_version);
@@ -30,7 +43,6 @@ fn main() {
                 o
             };
             if !dst.exists() {
-                //create_dir(&dst).usnwrap();
                 let mut dst_cp = dst.clone();
                 dst_cp.pop();
                 fs_extra::dir::copy(&src, &dst_cp, &cp_opts).unwrap();
@@ -39,11 +51,9 @@ fn main() {
 
         let bin_src_dir = ff_shared.as_path().join("bin");
         let lib_src_dir = ff_dev.as_path().join("lib");
-        let include_src_dir = ff_dev.as_path().join("include");
 
         copy_dir(&bin_src_dir, &bin_dir);
         copy_dir(&lib_src_dir, &lib_dir);
-        copy_dir(&include_src_dir, &include_dir);
 
         assert!(is_target_state(&out_path));
 
@@ -54,10 +64,6 @@ fn main() {
     }
 
     println!(
-        "cargo:rustc-env=INCLUDE={}",
-        (include_dir.to_str().unwrap())
-    );
-    println!(
         "cargo:rustc-link-search=native={}",
         (lib_dir.to_str().unwrap())
     );
@@ -67,8 +73,22 @@ fn main() {
     );
 }
 
+fn visit_dirs(dir: &Path, entries: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    if dir.is_dir() {
+        for entry in read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                visit_dirs(&path, entries)?;
+            }
+            entries.push(path);
+        }
+    }
+    Ok(())
+}
+
 fn is_target_state(path: &Path) -> bool {
-    path.join("bin").exists() && path.join("lib").exists() && path.join("include").exists()
+    path.join("bin").exists() && path.join("lib").exists()
 }
 
 fn download_ffmpeg(out_dir: &str, build_type: &str, version: &str) -> PathBuf {
