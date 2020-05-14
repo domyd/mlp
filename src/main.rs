@@ -4,7 +4,7 @@ use mlp::{MlpFrame, MlpFrameReader, MlpIterator};
 use num_format::{Locale, ToFormattedString};
 use std::fs::File;
 use std::{
-    io::{BufReader, BufWriter, Write, Seek, SeekFrom},
+    io::{BufReader, BufWriter, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 pub mod libav;
@@ -32,7 +32,8 @@ fn main() -> std::io::Result<()> {
             .arg("-s, --stream <FILE> 'The TrueHD stream.'"))
         .subcommand(App::new("ff")
             .arg("-i, --input <FILE>")
-            .arg("-o, --output <FILE>"))
+            .arg("-h, --head 'print first frame'")
+            .arg("-t, --tail 'print last frame'"))
         .get_matches();
 
     match args.subcommand() {
@@ -47,14 +48,18 @@ fn main() -> std::io::Result<()> {
             let map_values: Result<Vec<PathBuf>, _> = sub
                 .values_of("map")
                 .unwrap()
-                .map(|s| s.parse::<u16>().map(|n| get_path_for_segment(n, src_dir_buf.as_path())))
+                .map(|s| {
+                    s.parse::<u16>()
+                        .map(|n| get_path_for_segment(n, src_dir_buf.as_path()))
+                })
                 .collect();
             let segments = map_values.expect("some segments in the map aren't numbers.");
 
             dbg!(&segments);
 
             let mut writer = BufWriter::new(out_file);
-            let (bytes_written, overrun) = libav::concat_thd_from_m2ts(&segments, &mut writer).unwrap();
+            let (bytes_written, overrun) =
+                libav::concat_thd_from_m2ts(&segments, &mut writer).unwrap();
             dbg!(bytes_written, writer.seek(SeekFrom::Current(0)).unwrap());
             dbg!(overrun);
 
@@ -82,17 +87,20 @@ fn main() -> std::io::Result<()> {
             Ok(())
         }
         ("ff", Some(sub)) => {
-            let i_path = sub.value_of("input").unwrap();
-            let o_path = sub.value_of("output").unwrap();
-            let file = File::create(o_path).unwrap();
-            let mut writer = BufWriter::new(file);
-            //libav::count_frames(&i_path, &mut writer);
-            //libav::count_video_frames(sub.value_of("input").unwrap());
-            // let thd_stream = libav::read_thd_stream();
-            // println!("{}", thd_stream.len());
-            let pos = writer.seek(SeekFrom::Current(0)).unwrap();
-            let file = writer.into_inner().unwrap();
-            file.set_len(pos - 1).unwrap();
+            let input_path = PathBuf::from(sub.value_of("input").unwrap());
+            if let Some(head) = match sub.is_present("head") {
+                true => Some(true),
+                false => match sub.is_present("tail") {
+                    true => Some(false),
+                    false => None,
+                },
+            } {
+                println!("head: {}", head);
+                libav::thd_audio_read_test(&input_path, head);
+            } else {
+                println!("wrong args");
+            }
+
             Ok(())
         }
         _ => Ok(()),
