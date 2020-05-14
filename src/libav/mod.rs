@@ -13,9 +13,11 @@ use std::{
 
 pub mod av_codec_context;
 pub mod av_format_context;
+pub mod av_frame;
 pub mod av_packet;
 pub use av_codec_context::AVCodecContext;
 pub use av_format_context::AVFormatContext;
+pub use av_frame::AVFrame;
 pub use av_packet::{AVPacket, AVPacketReader};
 
 #[derive(Debug)]
@@ -71,6 +73,133 @@ impl ThdFrame {
     }
 }
 
+fn read_thd_audio_tail(format_context: &AVFormatContext, stream: &AVStream) {
+    let mut packet_queue: Vec<AVPacket> = Vec::with_capacity(128);
+    let mut thd_buf: Vec<u8> = Vec::with_capacity(4096);
+
+    // println!("bits per raw sample: {}", unsafe { (*a_ctx.ctx).bits_per_raw_sample });
+
+    while let Ok(packet) = format_context.read_frame() {
+        if unsafe { (*packet.pkt).stream_index } != stream.idx {
+            continue;
+        }
+
+        AVPacketReader::new(&packet)
+            .read_to_end(&mut thd_buf)
+            .unwrap();
+        let thd_frame = ThdFrame::from_bytes(&thd_buf).unwrap();
+        if thd_frame.has_major_sync {
+            // empty the frame queue, new major sync is in town
+            packet_queue.truncate(0);
+        }
+
+        packet_queue.push(packet);
+        thd_buf.truncate(0);
+    }
+
+    // we should now have the most recent THD group of frames in `packet_queue`.
+
+    println!("packet queue has {} elements", packet_queue.len());
+    assert!(packet_queue.len() >= 1);
+
+    let mut av_frame = AVFrame::new().unwrap();
+
+    let mut a_ctx = stream.get_codec_context().unwrap();
+    a_ctx.open(&stream).unwrap();
+
+    // decode first frame to get a sense of how much memory we'll need
+    // to allocate for the audio buffer
+    let mut packet_queue_iter = packet_queue.iter();
+    let first_packet = packet_queue_iter.next().unwrap();
+    a_ctx.decode_frame(&first_packet, &mut av_frame).unwrap();
+
+    let bytes_per_sample = av_frame.bytes_per_sample();
+    let num_channels = av_frame.channels();
+
+    let mut audio_buf: Vec<u8> = Vec::with_capacity(av_frame.len());
+
+    // write first frame
+    audio_buf.write_all(av_frame.as_slice()).unwrap();
+
+    for packet in packet_queue_iter {
+        audio_buf.truncate(0);
+        a_ctx.decode_frame(&packet, &mut av_frame).unwrap();
+        audio_buf.write_all(av_frame.as_slice()).unwrap();
+    }
+
+    // audio_buf now contains the last audio frame of the stream
+
+    println!("printing ch 0 samples ...");
+    for (_, sample) in audio_buf
+        .chunks_exact(bytes_per_sample)
+        .map(|c| i32::from_ne_bytes(c.try_into().unwrap()) / 256)
+        .enumerate()
+        .filter(|(i, _)| i % (num_channels as usize) == 0)
+    {
+        println!("sample: {}", sample);
+    }
+
+    println!("done!");
+}
+
+fn read_thd_audio_head(format_context: &AVFormatContext, stream: &AVStream) {
+    let mut av_frame = AVFrame::new().unwrap();
+    let mut print_frames = 1;
+
+    let mut a_ctx = stream.get_codec_context().unwrap();
+    a_ctx.open(&stream).unwrap();
+
+    println!("bits per raw sample: {}", unsafe {
+        (*a_ctx.ctx).bits_per_raw_sample
+    });
+
+    while let Ok(packet) = format_context.read_frame() {
+        if unsafe { (*packet.pkt).stream_index } != stream.idx {
+            continue;
+        }
+
+        a_ctx.decode_frame(&packet, &mut av_frame).unwrap();
+
+        let n_channels = av_frame.channels();
+        let bytes_per_sample = av_frame.bytes_per_sample();
+
+        // data is packed as data[sample][channel], in native endian order
+
+        println!("printing ch 0 samples ...");
+        for (_, sample) in av_frame
+            .as_slice()
+            .chunks_exact(bytes_per_sample)
+            .map(|c| i32::from_ne_bytes(c.try_into().unwrap()) / 256)
+            .enumerate()
+            .filter(|(i, _)| i % (n_channels as usize) == 0)
+        {
+            println!("sample: {}", sample);
+        }
+
+        print_frames -= 1;
+        if print_frames <= 0 {
+            break;
+        }
+    }
+
+    println!("done!");
+}
+
+pub fn thd_audio_read_test(file: &PathBuf, head: bool) {
+    let file_path_str = file.to_str().unwrap();
+    println!("processing file '{}' ...", &file_path_str);
+    let avctx = AVFormatContext::new(&file_path_str).unwrap();
+    let streams = avctx.get_streams().unwrap();
+
+    let audio_stream = streams.iter().find(|&s| is_true_hd_stream(s)).unwrap();
+
+    if head {
+        read_thd_audio_head(&avctx, &audio_stream);
+    } else {
+        read_thd_audio_tail(&avctx, &audio_stream);
+    }
+}
+
 pub fn concat_thd_from_m2ts<W: Write + Seek>(
     files: &[PathBuf],
     out_writer: &mut W,
@@ -89,11 +218,6 @@ pub fn concat_thd_from_m2ts<W: Write + Seek>(
             .find(|&s| unsafe { (*s.codec_params).codec_type == AVMEDIA_TYPE_VIDEO })
             .unwrap();
         let audio_stream = streams.iter().find(|&s| is_true_hd_stream(s)).unwrap();
-
-        let v_ctx = video_stream.get_codec_context().unwrap();
-        v_ctx.open(&video_stream).unwrap();
-        let a_ctx = audio_stream.get_codec_context().unwrap();
-        a_ctx.open(&audio_stream).unwrap();
 
         let res = write_thd_segment(&avctx, video_stream, audio_stream, overrun_acc, out_writer)?;
         overrun_acc = res.1;
@@ -121,6 +245,10 @@ pub fn write_thd_segment<W: Write + Seek>(
         if unsafe { (*packet.pkt).stream_index } == video_stream.idx {
             n_video_frames += 1;
         } else if unsafe { (*packet.pkt).stream_index } == audio_stream.idx {
+            {
+                let a_ctx = audio_stream.get_codec_context().unwrap();
+                a_ctx.open(&audio_stream).unwrap();
+            }
             n_bytes_written += AVPacketReader::new(&packet)
                 .read_to_end(&mut thd_buf)
                 .unwrap();

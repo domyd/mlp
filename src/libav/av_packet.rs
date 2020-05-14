@@ -34,9 +34,7 @@ impl<'packet> AVPacketReader<'_> {
     pub fn new(packet: &'packet AVPacket) -> AVPacketReader<'packet> {
         let slice: &'packet [u8] =
             unsafe { std::slice::from_raw_parts((*packet.pkt).data, (*packet.pkt).size as usize) };
-        AVPacketReader {
-            data_slice: slice,
-        }
+        AVPacketReader { data_slice: slice }
     }
 }
 
