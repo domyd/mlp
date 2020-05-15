@@ -1,4 +1,4 @@
-use clap::{App, Arg};
+use clap::{App, Arg, ArgGroup};
 use itertools::Itertools;
 use mlp::{MlpFrame, MlpFrameReader, MlpIterator};
 use num_format::{Locale, ToFormattedString};
@@ -11,70 +11,135 @@ pub mod libav;
 pub mod mlp;
 
 fn main() -> std::io::Result<()> {
-    let args = App::new("MLP Combiner")
+    let args = App::new("TrueHD Demuxer")
         .version("0.1")
         .author("Dominik Mydlil <dominik.mydlil@outlook.com>")
         .about("Dolby TrueHD utility tool")
-        .subcommand(App::new("append")
-            .about("Appends individual TrueHD streams together")
-            .arg("-s, --source <DIRECTORY> 'Sets the directory that contains the m2ts source files.'")
-            .arg(Arg::with_name("map")
-                .short('m')
-                .long("map")
-                .takes_value(true)
-                .required(true)
-                .min_values(2)
-                .value_delimiter(",")
-                .about("Sets the ordered list of TrueHD segments."))
-            .arg("<OUTPUT>                 'Sets the output file.'"))
-        .subcommand(App::new("info")
-            .about("Prints information about the TrueHD stream.")
-            .arg("-s, --stream <FILE> 'The TrueHD stream.'"))
-        .subcommand(App::new("ff")
-            .arg("-i, --input <FILE>")
-            .arg("-h, --head 'print first frame'")
-            .arg("-t, --tail 'print last frame'"))
+        .subcommand(
+            App::new("demux")
+                .about("Demux THD stream from blu-ray files.")
+                .subcommand(
+                    App::new("playlist")
+                        .about("Demux from a blu-ray playlist file.")
+                        .arg(
+                            Arg::with_name("playlist")
+                                .about("Sets the path to the playlist file (.mpls).")
+                                .value_name("PLAYLIST-FILE")
+                                .required(true),
+                        )
+                        .arg(
+                            Arg::with_name("output")
+                                .about("Sets the output TrueHD file.")
+                                .value_name("OUTPUT-FILE")
+                                .required(true),
+                        ),
+                )
+                .subcommand(
+                    App::new("segments")
+                        .about("Demux from blu-ray media files.")
+                        .arg(
+                            Arg::with_name("segment-list")
+                                .about("Sets the comma-separated list of TrueHD segments.")
+                                .short('l')
+                                .long("segment-list")
+                                .group("segment-list-group")
+                                .takes_value(true)
+                                .min_values(2)
+                                .value_delimiter(",")
+                                .value_name("SEGMENT-LIST"),
+                        )
+                        .arg(
+                            Arg::with_name("dgdemux-segment-list")
+                                .about("Sets the list of segments, in DGDemux's format.")
+                                .long("dgdemux-segment-list")
+                                .value_name("SEGMENT-LIST")
+                                .group("segment-list-group")
+                                .takes_value(true),
+                        )
+                        .arg(
+                            Arg::with_name("stream-dir")
+                                .about("Sets the directory that contains the m2ts source files.")
+                                .requires("segment-list-group")
+                                .value_name("DIRECTORY")
+                                .short('s')
+                                .long("stream-dir"),
+                        )
+                        .arg(
+                            Arg::with_name("output")
+                                .about("Sets the output TrueHD file.")
+                                .short('o')
+                                .long("output")
+                                .value_name("OUTPUT-FILE")
+                                .required(true),
+                        )
+                        .group(
+                            ArgGroup::with_name("segment-list-group")
+                                .requires("stream-dir")
+                                .required(true),
+                        ),
+                ),
+        )
+        .subcommand(
+            App::new("info")
+                .about("Prints information about the TrueHD stream.")
+                .arg("-s, --stream <FILE> 'The TrueHD stream.'"),
+        )
+        .subcommand(
+            App::new("ff")
+                .arg("-i, --input <FILE>")
+                .arg("-h, --head 'print first frame'")
+                .arg("-t, --tail 'print last frame'"),
+        )
         .get_matches();
 
     match args.subcommand() {
-        ("append", Some(sub)) => {
-            let out_file_str: &str = sub.value_of("OUTPUT").unwrap();
-            let out_file = File::create(out_file_str)
-                .expect(format!("Failed to create file '{0}'.", out_file_str).as_ref());
+        ("demux", Some(sub)) => match sub.subcommand() {
+            ("playlist", Some(sub)) => {
+                println!("Not yet implemented, sorry!");
+                Ok(())
+            }
+            ("segments", Some(sub)) => {
+                let out_file_str: &str = sub.value_of("output").unwrap();
+                let out_file = File::create(out_file_str)
+                    .expect(format!("Failed to create file '{0}'.", out_file_str).as_ref());
 
-            let src_dir_str: &str = sub.value_of("source").unwrap();
-            let src_dir_buf = PathBuf::from(src_dir_str);
+                let src_dir_str: &str = sub.value_of("stream-dir").unwrap();
+                let src_dir_buf = PathBuf::from(src_dir_str);
 
-            let map_values: Result<Vec<PathBuf>, _> = sub
-                .values_of("map")
-                .unwrap()
+                let segments: Option<Vec<PathBuf>> = {
+                    if let Some(values) = sub.values_of("segment-list") {
+                        let values: Result<Vec<u16>, _> =
+                            values.map(|s| s.parse::<u16>()).collect();
+                        let vn: Vec<u16> = values.unwrap();
+                        Some(vn)
+                    } else if let Some(dg_list) = sub.value_of("dgdemux-segment-list") {
+                        let values: Vec<u16> = dgdemux::parse_segment_string(dg_list).unwrap();
+                        Some(values)
+                    } else {
+                        // can't happen, clap makes sure of that
+                        None
+                    }
+                }
                 .map(|s| {
-                    s.parse::<u16>()
-                        .map(|n| get_path_for_segment(n, src_dir_buf.as_path()))
-                })
-                .collect();
-            let segments = map_values.expect("some segments in the map aren't numbers.");
+                    s.iter()
+                        .map(|x| get_path_for_segment(*x, src_dir_buf.as_path()))
+                        .collect()
+                });
 
-            dbg!(&segments);
+                if let Some(segment_paths) = segments {
+                    dbg!(&segment_paths);
 
-            let mut writer = BufWriter::new(out_file);
-            let overrun = libav::concat_thd_from_m2ts(&segments, &mut writer).unwrap();
-            dbg!(overrun.samples());
+                    let mut writer = BufWriter::new(out_file);
+                    let overrun = libav::concat_thd_from_m2ts(&segment_paths, &mut writer).unwrap();
+                    dbg!(overrun.samples());
+                } else {
+                    println!("segment list invalid.");
+                }
 
-            // let frames: Vec<MlpFrame> = segments
-            //     .iter()
-            //     .flat_map(|s| {
-            //         let path = get_path_for_segment(*s, src_dir_buf.as_path());
-            //         let file = File::open(path).unwrap();
-            //         MlpIterator::with_segment(BufReader::new(file), *s)
-            //     })
-            //     .collect();
-
-            //let mut out_file_writer = BufWriter::new(out_file);
-            //write_mlp_frames(&frames, src_dir_buf.as_path(), &mut out_file_writer)?;
-
-            Ok(())
-        }
+                Ok(())
+            },
+            _ => Ok(())
+        },
         ("info", Some(sub)) => {
             let path = PathBuf::from(sub.value_of("stream").unwrap());
             print_stream_info(path.as_path())?;
@@ -98,6 +163,22 @@ fn main() -> std::io::Result<()> {
             Ok(())
         }
         _ => Ok(()),
+    }
+}
+
+mod dgdemux {
+    pub fn parse_segment_string(list_str: &str) -> Result<Vec<u16>, std::num::ParseIntError> {
+        list_str
+            .split('+')
+            .map(|x| x.replace(".m2ts", "").parse::<u16>())
+            .collect()
+    }
+    
+    #[test]
+    fn dgdemux_segment_map_test() {
+        let dgd = "00055.m2ts+00056.m2ts+00086.m2ts+00058.m2ts+00074.m2ts";
+        let expect: Vec<u16> = vec![55, 56, 86, 58, 74];
+        assert_eq!(expect, parse_segment_string(dgd).unwrap());
     }
 }
 
