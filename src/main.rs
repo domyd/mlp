@@ -1,5 +1,6 @@
 use clap::{App, Arg, ArgGroup};
 use itertools::Itertools;
+use libav::DemuxOptions;
 use mlp::{MlpFrame, MlpFrameReader, MlpIterator};
 use num_format::{Locale, ToFormattedString};
 use std::fs::File;
@@ -77,6 +78,31 @@ fn main() -> std::io::Result<()> {
                                 .requires("stream-dir")
                                 .required(true),
                         ),
+                )
+                .arg(
+                    Arg::with_name("audio-threshold")
+                        .long("threshold")
+                        .value_name("THRESHOLD")
+                        .default_value("1024")
+                        .validator(|s| {
+                            s.parse::<i32>().map_err(|_| String::from("Must be a number."))
+                        })
+                        .required(false)
+                        .global(true)
+                        .about("Determines the sensitivity of the TrueHD frame comparer. Defaults to 1024.")
+                        .long_about(
+"This value determines when two samples can be considered equal 
+for the purposes of checking whether two TrueHD frames contain 
+the same audio. The default value of 1024 means that two frames
+
+    frame 1: [-250282, -231928, -200182, ...]
+    frame 2: [-249876, -232048, -201012, ...]
+
+would be considered equal. This should practically never lead 
+to false positives, as the deltas will be orders of magnitude 
+higher (in the hundreds of thousands range) in case two frames 
+contain different audio."
+                        ),
                 ),
         )
         .subcommand(
@@ -94,7 +120,7 @@ fn main() -> std::io::Result<()> {
 
     match args.subcommand() {
         ("demux", Some(sub)) => match sub.subcommand() {
-            ("playlist", Some(sub)) => {
+            ("playlist", Some(_)) => {
                 println!("Not yet implemented, sorry!");
                 Ok(())
             }
@@ -105,6 +131,11 @@ fn main() -> std::io::Result<()> {
 
                 let src_dir_str: &str = sub.value_of("stream-dir").unwrap();
                 let src_dir_buf = PathBuf::from(src_dir_str);
+
+                let threshold = sub
+                    .value_of("threshold")
+                    .map(|s| s.parse::<i32>().unwrap())
+                    .unwrap();
 
                 let segments: Option<Vec<PathBuf>> = {
                     if let Some(values) = sub.values_of("segment-list") {
@@ -130,15 +161,19 @@ fn main() -> std::io::Result<()> {
                     dbg!(&segment_paths);
 
                     let mut writer = BufWriter::new(out_file);
-                    let overrun = libav::concat_thd_from_m2ts(&segment_paths, &mut writer).unwrap();
+                    let demux_opts = DemuxOptions {
+                        audio_match_threshold: threshold,
+                    };
+                    let overrun =
+                        libav::demux_thd(&segment_paths, &demux_opts, &mut writer).unwrap();
                     dbg!(overrun.samples());
                 } else {
                     println!("segment list invalid.");
                 }
 
                 Ok(())
-            },
-            _ => Ok(())
+            }
+            _ => Ok(()),
         },
         ("info", Some(sub)) => {
             let path = PathBuf::from(sub.value_of("stream").unwrap());
@@ -147,6 +182,10 @@ fn main() -> std::io::Result<()> {
         }
         ("ff", Some(sub)) => {
             let input_path = PathBuf::from(sub.value_of("input").unwrap());
+            let threshold = sub
+                .value_of("threshold")
+                .map(|s| s.parse::<i32>().unwrap())
+                .unwrap();
             if let Some(head) = match sub.is_present("head") {
                 true => Some(true),
                 false => match sub.is_present("tail") {
@@ -155,7 +194,7 @@ fn main() -> std::io::Result<()> {
                 },
             } {
                 println!("head: {}", head);
-                libav::thd_audio_read_test(&input_path, head);
+                libav::thd_audio_read_test(&input_path, head, threshold);
             } else {
                 println!("wrong args");
             }
@@ -173,7 +212,7 @@ mod dgdemux {
             .map(|x| x.replace(".m2ts", "").parse::<u16>())
             .collect()
     }
-    
+
     #[test]
     fn dgdemux_segment_map_test() {
         let dgd = "00055.m2ts+00056.m2ts+00086.m2ts+00058.m2ts+00074.m2ts";

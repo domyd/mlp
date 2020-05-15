@@ -15,8 +15,6 @@ pub use av_format_context::{AVCodecType, AVFormatContext, AVStream};
 pub use av_frame::AVFrame;
 pub use av_packet::{AVPacket, AVPacketReader};
 
-const AUDIO_MATCH_THRESHOLD: i32 = 256;
-
 #[derive(Debug)]
 pub enum AVError {
     IoErr(std::io::Error),
@@ -200,7 +198,7 @@ fn read_thd_audio_head(
     return None;
 }
 
-pub fn thd_audio_read_test(file: &PathBuf, head: bool) {
+pub fn thd_audio_read_test(file: &PathBuf, head: bool, threshold: i32) {
     let file_path_str = file.to_str().unwrap();
     println!("processing file '{}' ...", &file_path_str);
     let avctx = AVFormatContext::new(&file_path_str).unwrap();
@@ -213,19 +211,24 @@ pub fn thd_audio_read_test(file: &PathBuf, head: bool) {
 
     if head {
         if let Some(frame) = read_thd_audio_head(&avctx, &audio_stream) {
-            println!("is silence: {}", &frame.is_silence(AUDIO_MATCH_THRESHOLD));
+            println!("is silence: {}", &frame.is_silence(threshold));
             print_frames(&vec![frame]);
         }
     } else {
         if let Some(frame) = read_thd_audio_tail(&avctx, &audio_stream) {
-            println!("is silence: {}", &frame.is_silence(AUDIO_MATCH_THRESHOLD));
+            println!("is silence: {}", &frame.is_silence(threshold));
             print_frames(&vec![frame]);
         }
     }
 }
 
-pub fn concat_thd_from_m2ts<W: Write + Seek>(
+pub struct DemuxOptions {
+    pub audio_match_threshold: i32,
+}
+
+pub fn demux_thd<W: Write + Seek>(
     files: &[PathBuf],
+    options: &DemuxOptions,
     out_writer: &mut W,
 ) -> Result<ThdOverrun, AVError> {
     let mut overrun_acc = ThdOverrun { acc: 0.0 };
@@ -250,7 +253,9 @@ pub fn concat_thd_from_m2ts<W: Write + Seek>(
             }
             .unwrap();
 
-            if tail.is_silence(AUDIO_MATCH_THRESHOLD) || head.is_silence(AUDIO_MATCH_THRESHOLD) {
+            if tail.is_silence(options.audio_match_threshold)
+                || head.is_silence(options.audio_match_threshold)
+            {
                 // fall back to bresenham algorithm
                 println!("AUDIO APPEARS TO BE SILENCE, FALLBACK TO OVERRUN MINIMIZATION");
                 while overrun_acc.samples() >= 20 {
