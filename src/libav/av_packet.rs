@@ -1,4 +1,4 @@
-use super::AVError;
+use super::{AVError, AVStream};
 use ffmpeg4_ffi::sys as ff;
 use std::io::Read;
 
@@ -14,6 +14,14 @@ impl AVPacket {
         } else {
             Ok(AVPacket { pkt })
         }
+    }
+
+    pub fn stream_index(&self) -> i32 {
+        unsafe { (*self.pkt).stream_index }
+    }
+
+    pub fn of_stream(&self, stream: &AVStream) -> bool {
+        self.stream_index() == stream.index
     }
 }
 

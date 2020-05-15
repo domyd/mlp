@@ -1,10 +1,11 @@
-use super::{AVError, AVPacket, AVStream};
+use super::{AVCodecContext, AVError, AVPacket};
 use ffmpeg4_ffi::sys as ff;
 
 pub struct AVFormatContext {
     ctx: *mut ff::AVFormatContext,
 }
 
+#[derive(PartialEq)]
 pub enum AVCodecType {
     Unknown,
     Video,
@@ -12,6 +13,34 @@ pub enum AVCodecType {
     Data,
     Subtitle,
     Attachment,
+}
+
+pub struct AVStream {
+    pub index: i32,
+    pub codec: *mut ff::AVCodec,
+    pub codec_params: *mut ff::AVCodecParameters,
+}
+
+impl AVStream {
+    pub fn get_codec_context(&self) -> Result<AVCodecContext, AVError> {
+        let ctx = AVCodecContext::new(self)?;
+        Ok(ctx)
+    }
+
+    pub fn codec_id(&self) -> ff::AVCodecID {
+        unsafe { (*self.codec).id }
+    }
+
+    pub fn codec_type(&self) -> AVCodecType {
+        match unsafe { (*self.codec_params).codec_type } {
+            ff::AVMediaType_AVMEDIA_TYPE_VIDEO => AVCodecType::Video,
+            ff::AVMediaType_AVMEDIA_TYPE_AUDIO => AVCodecType::Audio,
+            ff::AVMediaType_AVMEDIA_TYPE_DATA => AVCodecType::Data,
+            ff::AVMediaType_AVMEDIA_TYPE_SUBTITLE => AVCodecType::Subtitle,
+            ff::AVMediaType_AVMEDIA_TYPE_ATTACHMENT => AVCodecType::Attachment,
+            _ => AVCodecType::Unknown,
+        }
+    }
 }
 
 pub struct AVCodecParameters {
@@ -67,7 +96,7 @@ impl AVFormatContext {
                 }
 
                 return Some(AVStream {
-                    idx: i as i32,
+                    index: i as i32,
                     codec,
                     codec_params,
                 });

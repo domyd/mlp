@@ -4,7 +4,7 @@ use mlp::{MlpFrame, MlpFrameReader, MlpIterator};
 use num_format::{Locale, ToFormattedString};
 use std::fs::File;
 use std::{
-    io::{BufReader, BufWriter, Seek, SeekFrom, Write},
+    io::{BufReader, BufWriter, Write},
     path::{Path, PathBuf},
 };
 pub mod libav;
@@ -58,14 +58,9 @@ fn main() -> std::io::Result<()> {
             dbg!(&segments);
 
             let mut writer = BufWriter::new(out_file);
-            let (bytes_written, overrun) =
+            let overrun =
                 libav::concat_thd_from_m2ts(&segments, &mut writer).unwrap();
-            dbg!(bytes_written, writer.seek(SeekFrom::Current(0)).unwrap());
-            dbg!(overrun);
-
-            let pos = writer.seek(SeekFrom::Current(0)).unwrap();
-            let file = writer.into_inner().unwrap();
-            file.set_len(pos - 1).unwrap();
+            dbg!(overrun.samples());
 
             // let frames: Vec<MlpFrame> = segments
             //     .iter()
@@ -143,6 +138,7 @@ fn print_stream_info(filepath: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn write_mlp_frames<W: Write>(
     frames: &[MlpFrame],
     src_dir: &Path,
