@@ -1,8 +1,7 @@
 use ffmpeg4_ffi::sys as ff;
 use std::{
-    collections::VecDeque,
     convert::TryInto,
-    io::{Read, Seek, SeekFrom, Write},
+    io::{Seek, SeekFrom, Write},
     ops::{Add, AddAssign},
     path::PathBuf,
 };
@@ -15,6 +14,8 @@ pub use av_codec_context::AVCodecContext;
 pub use av_format_context::{AVCodecType, AVFormatContext, AVStream};
 pub use av_frame::AVFrame;
 pub use av_packet::{AVPacket, AVPacketReader};
+
+const AUDIO_MATCH_THRESHOLD: i32 = 256;
 
 #[derive(Debug)]
 pub enum AVError {
@@ -46,76 +47,142 @@ impl ThdFrameHeader {
     }
 }
 
-fn read_thd_audio_tail(format_context: &AVFormatContext, stream: &AVStream) {
-    let mut packet_queue: Vec<AVPacket> = Vec::with_capacity(128);
-    let mut thd_buf: Vec<u8> = Vec::with_capacity(4096);
-
-    while let Ok(packet) = format_context.read_frame() {
-        if !packet.of_stream(stream) {
-            continue;
-        }
-
-        AVPacketReader::new(&packet)
-            .read_to_end(&mut thd_buf)
-            .unwrap();
-        let thd_frame = ThdFrameHeader::from_bytes(&thd_buf).unwrap();
-        if thd_frame.has_major_sync {
-            // clear the frame queue, new major sync is in town
-            packet_queue.truncate(0);
-        }
-
-        packet_queue.push(packet);
-        thd_buf.truncate(0);
-    }
-
-    // we should now have the most recent THD group of frames in `packet_queue`.
-
-    println!("packet queue has {} elements", packet_queue.len());
-    assert!(packet_queue.len() >= 1);
-
-    let mut av_frame = AVFrame::new().unwrap();
-
-    let mut a_ctx = stream.get_codec_context().unwrap();
-    a_ctx.open(&stream).unwrap();
-
-    // decode first frame to get a sense of how much memory we'll need
-    // to allocate for the audio buffer
-    let mut packet_queue_iter = packet_queue.iter();
-    let first_packet = packet_queue_iter.next().unwrap();
-    a_ctx.decode_frame(&first_packet, &mut av_frame).unwrap();
-
-    let bytes_per_sample = av_frame.bytes_per_sample();
-    let num_channels = av_frame.channels();
-
-    let mut audio_buf: Vec<u8> = Vec::with_capacity(av_frame.len());
-
-    // write first frame
-    audio_buf.write_all(av_frame.as_slice()).unwrap();
-
-    for packet in packet_queue_iter {
-        audio_buf.truncate(0);
-        a_ctx.decode_frame(&packet, &mut av_frame).unwrap();
-        audio_buf.write_all(av_frame.as_slice()).unwrap();
-    }
-
-    // audio_buf now contains the last audio frame of the stream
-
-    println!("printing ch 0 samples ...");
-    for (_, sample) in audio_buf
-        .chunks_exact(bytes_per_sample)
-        .map(|c| i32::from_ne_bytes(c.try_into().unwrap()) / 256)
-        .enumerate()
-        .filter(|(i, _)| i % (num_channels as usize) == 0)
-    {
-        println!("sample: {}", sample);
-    }
-
-    println!("done!");
+pub struct ThdSample {
+    // TODO: half the size of it by packing the 24 bit data with the 8 bit channel number
+    // most significant byte (native endianness) contains the channel number as a u8,
+    // least three significant bytes contain the 24-bit audio sample
+    // packed: u32
+    value: i32,
+    channel: u8,
 }
 
-fn read_thd_audio_head(format_context: &AVFormatContext, stream: &AVStream) {
+impl ThdSample {
+    pub fn from_bytes(bytes: [u8; 4], channel: u8) -> Self {
+        let sample = i32::from_ne_bytes(bytes) / 256;
+        ThdSample::new(sample, channel)
+    }
+
+    pub fn new(sample: i32, channel: u8) -> Self {
+        ThdSample {
+            value: sample,
+            channel,
+        }
+    }
+}
+
+pub struct DecodedThdFrame {
+    samples: Vec<ThdSample>,
+    num_channels: u8,
+}
+
+impl DecodedThdFrame {
+    pub fn new(bytes: &[u8], bytes_per_sample: usize, channels: u8) -> DecodedThdFrame {
+        let samples: Vec<ThdSample> = bytes
+            .chunks_exact(bytes_per_sample)
+            .enumerate()
+            .map(|(i, c)| {
+                ThdSample::from_bytes(c.try_into().unwrap(), (i % channels as usize) as u8)
+            })
+            .collect();
+        DecodedThdFrame {
+            samples,
+            num_channels: channels,
+        }
+    }
+
+    pub fn get_max_distance(&self, other: &Self) -> i32 {
+        let mut max_distance: i32 = 0;
+        for (l, r) in self.samples.iter().zip(other.samples.iter()) {
+            let diff = (l.value - r.value).abs();
+            max_distance = diff.max(max_distance);
+        }
+        max_distance
+    }
+
+    pub fn matches_approximately(&self, other: &Self, tolerance: i32) -> bool {
+        for (l, r) in self.samples.iter().zip(other.samples.iter()) {
+            let diff = (l.value - r.value).abs();
+            if diff > tolerance {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    pub fn is_silence(&self, threshold: i32) -> bool {
+        self.samples.iter().all(|s| s.value.abs() < threshold)
+    }
+}
+
+impl From<&AVFrame> for DecodedThdFrame {
+    fn from(frame: &AVFrame) -> Self {
+        let bytes = frame.as_slice();
+        let bytes_per_sample = frame.bytes_per_sample();
+        let channels = frame.channels();
+        DecodedThdFrame::new(bytes, bytes_per_sample, channels)
+    }
+}
+
+fn decode_thd(stream: &AVStream, packets: Vec<AVPacket>) -> Vec<DecodedThdFrame> {
+    assert!(stream.codec_id() == ff::AVCodecID_AV_CODEC_ID_TRUEHD);
+
     let mut av_frame = AVFrame::new().unwrap();
-    let mut print_frames = 1;
+
+    let mut a_ctx = stream.get_codec_context().unwrap();
+    a_ctx.open(&stream).unwrap();
+
+    let mut frame_buf: Vec<DecodedThdFrame> = Vec::with_capacity(packets.len());
+    for packet in packets {
+        a_ctx.decode_frame(&packet, &mut av_frame).unwrap();
+        let decoded_frame = DecodedThdFrame::from(&av_frame);
+        frame_buf.push(decoded_frame);
+    }
+
+    frame_buf
+}
+
+fn print_frames(frames: &Vec<DecodedThdFrame>) {
+    for sample in frames.iter().flat_map(|f| f.samples.iter()) {
+        println!("ch[{}], s[{}]", sample.channel, sample.value)
+    }
+    // match  {
+    //     Some(samples) => {
+    //         for sample in samples {
+
+    //         }
+    //     }
+    //     None => println!("no samples."),
+    // }
+}
+
+fn read_thd_audio_tail(
+    format_context: &AVFormatContext,
+    stream: &AVStream,
+) -> Option<DecodedThdFrame> {
+    let mut packets: Vec<AVPacket> = Vec::with_capacity(128);
+
+    while let Ok(packet) = format_context.read_frame() {
+        if !packet.of_stream(stream) {
+            continue;
+        }
+
+        let thd_frame = ThdFrameHeader::from_bytes(&packet.as_slice()).unwrap();
+        if thd_frame.has_major_sync {
+            // clear the frame queue, new major sync is in town
+            packets.truncate(0);
+        }
+
+        packets.push(packet);
+    }
+
+    decode_thd(stream, packets).pop()
+}
+
+fn read_thd_audio_head(
+    format_context: &AVFormatContext,
+    stream: &AVStream,
+) -> Option<DecodedThdFrame> {
+    let mut av_frame = AVFrame::new().unwrap();
 
     let mut a_ctx = stream.get_codec_context().unwrap();
     a_ctx.open(&stream).unwrap();
@@ -126,30 +193,11 @@ fn read_thd_audio_head(format_context: &AVFormatContext, stream: &AVStream) {
         }
 
         a_ctx.decode_frame(&packet, &mut av_frame).unwrap();
-
-        let n_channels = av_frame.channels();
-        let bytes_per_sample = av_frame.bytes_per_sample();
-
-        // data is packed as data[sample][channel], in native endian order
-
-        println!("printing ch 0 samples ...");
-        for (_, sample) in av_frame
-            .as_slice()
-            .chunks_exact(bytes_per_sample)
-            .map(|c| i32::from_ne_bytes(c.try_into().unwrap()) / 256)
-            .enumerate()
-            .filter(|(i, _)| i % (n_channels as usize) == 0)
-        {
-            println!("sample: {}", sample);
-        }
-
-        print_frames -= 1;
-        if print_frames <= 0 {
-            break;
-        }
+        let decoded_frame = DecodedThdFrame::from(&av_frame);
+        return Some(decoded_frame);
     }
 
-    println!("done!");
+    return None;
 }
 
 pub fn thd_audio_read_test(file: &PathBuf, head: bool) {
@@ -164,9 +212,15 @@ pub fn thd_audio_read_test(file: &PathBuf, head: bool) {
         .unwrap();
 
     if head {
-        read_thd_audio_head(&avctx, &audio_stream);
+        if let Some(frame) = read_thd_audio_head(&avctx, &audio_stream) {
+            println!("is silence: {}", &frame.is_silence(AUDIO_MATCH_THRESHOLD));
+            print_frames(&vec![frame]);
+        }
     } else {
-        read_thd_audio_tail(&avctx, &audio_stream);
+        if let Some(frame) = read_thd_audio_tail(&avctx, &audio_stream) {
+            println!("is silence: {}", &frame.is_silence(AUDIO_MATCH_THRESHOLD));
+            print_frames(&vec![frame]);
+        }
     }
 }
 
@@ -181,15 +235,53 @@ pub fn concat_thd_from_m2ts<W: Write + Seek>(
         // check overrun and apply sync, if necessary
         if let Some(ref mut prev) = previous_segment {
             overrun_acc += prev.audio_overrun();
-            while overrun_acc.samples() >= 20 {
-                dbg!(overrun_acc.samples());
-                if let Some(frame) = prev.most_recent_frames.pop_front() {
+
+            // match audio data
+            let (tail, tail_header) = prev.last_group_of_frames.last().unwrap();
+            let head = {
+                let file_path_str = file.to_str().unwrap();
+                let avctx = AVFormatContext::new(&file_path_str).unwrap();
+                let streams = avctx.get_streams().unwrap();
+                let thd_stream = streams
+                    .iter()
+                    .find(|&s| s.codec_id() == ff::AVCodecID_AV_CODEC_ID_TRUEHD)
+                    .unwrap();
+                read_thd_audio_head(&avctx, thd_stream)
+            }
+            .unwrap();
+
+            if tail.is_silence(AUDIO_MATCH_THRESHOLD) || head.is_silence(AUDIO_MATCH_THRESHOLD) {
+                // fall back to bresenham algorithm
+                println!("AUDIO APPEARS TO BE SILENCE, FALLBACK TO OVERRUN MINIMIZATION");
+                while overrun_acc.samples() >= 20 {
+                    dbg!(overrun_acc.samples());
+                    if let Some((_, header)) = prev.last_group_of_frames.last() {
+                        // delete the most recently written frame by moving the cursor back
+                        out_writer
+                            .seek(SeekFrom::Current(-(header.length as i64)))
+                            .unwrap();
+                        overrun_acc.sub_frames(1);
+                        println!("CUT FRAME");
+                    }
+                }
+            } else {
+                // do audio matching
+                let max_distance = head.get_max_distance(tail);
+                println!("max distance between tail and head: {}", max_distance);
+
+                // Empirically, 256 seems like a fairly good tolerance value.
+                // When the audio doesn't match, the max difference tends to
+                // be in the hundreds of thousands, so there should be a good
+                // bit of headroom in there.
+                if head.matches_approximately(tail, 256) {
                     // delete the most recently written frame by moving the cursor back
                     out_writer
-                        .seek(SeekFrom::Current(-(frame.length as i64)))
+                        .seek(SeekFrom::Current(-(tail_header.length as i64)))
                         .unwrap();
                     overrun_acc.sub_frames(1);
-                    println!("CUT FRAME");
+                    println!("AUDIO MATCHES, CUT FRAME");
+                } else {
+                    println!("AUDIO DOESN'T MATCH, LEAVE FRAME");
                 }
             }
         }
@@ -210,12 +302,7 @@ pub fn concat_thd_from_m2ts<W: Write + Seek>(
             .find(|&s| s.codec_id() == ff::AVCodecID_AV_CODEC_ID_TRUEHD)
             .unwrap();
 
-        if let Ok(segment) = write_thd_segment(
-            &avctx,
-            video_stream,
-            thd_stream,
-            out_writer,
-        ) {
+        if let Ok(segment) = write_thd_segment(&avctx, video_stream, thd_stream, out_writer) {
             previous_segment = Some(segment);
         } else {
             println!("error happened while processing '{}'", file.display());
@@ -225,31 +312,9 @@ pub fn concat_thd_from_m2ts<W: Write + Seek>(
     return Ok(overrun_acc);
 }
 
-struct VecDequeFixedSize<T> {
-    vec: VecDeque<T>,
-    max_size: usize,
-}
-
-impl<T> VecDequeFixedSize<T> {
-    pub fn new(max_size: usize) -> VecDequeFixedSize<T> {
-        VecDequeFixedSize {
-            vec: VecDeque::with_capacity(max_size + 1),
-            max_size,
-        }
-    }
-
-    pub fn into_inner(self) -> VecDeque<T> {
-        self.vec
-    }
-
-    pub fn push_front(&mut self, value: T) {
-        self.vec.push_front(value);
-        self.vec.truncate(self.max_size);
-    }
-}
-
 struct ThdSegment {
-    most_recent_frames: VecDeque<ThdFrameHeader>,
+    //most_recent_frames: VecDeque<ThdFrameHeader>,
+    last_group_of_frames: Vec<(DecodedThdFrame, ThdFrameHeader)>,
     num_frames: u32,
     num_video_frames: u32,
 }
@@ -281,9 +346,12 @@ fn write_thd_segment<W: Write + Seek>(
 ) -> Result<ThdSegment, AVError> {
     let (mut num_frames, mut num_video_frames) = (0u32, 0u32);
 
-    // 4096 bytes should be large enough for any TrueHD frame
-    let mut thd_buf: Vec<u8> = Vec::with_capacity(4096);
-    let mut frame_queue: VecDequeFixedSize<ThdFrameHeader> = VecDequeFixedSize::new(10);
+    // keeps the packets of the most recent group of frames
+    // (all frames "belonging" to one major sync)
+    let mut packet_queue: Vec<AVPacket> = Vec::with_capacity(128);
+
+    // keeps track the last 10 frame headers we've written
+    let mut frame_queue: Vec<ThdFrameHeader> = Vec::with_capacity(128);
 
     while let Ok(packet) = format_context.read_frame() {
         if packet.of_stream(video_stream) {
@@ -292,26 +360,32 @@ fn write_thd_segment<W: Write + Seek>(
             num_video_frames += 1;
         } else if packet.of_stream(audio_stream) {
             // write the THD frame to the output
-            AVPacketReader::new(&packet)
-                .read_to_end(&mut thd_buf)
-                .unwrap();
-            thd_writer.write_all(&thd_buf).unwrap();
+            let pkt_slice = packet.as_slice();
+            thd_writer.write_all(&pkt_slice).unwrap();
 
             // push frame header to queue (we want to remember the last
             // n frame headers we saw)
-            let frame = ThdFrameHeader::from_bytes(&thd_buf).unwrap();
-            frame_queue.push_front(frame);
-
-            // clear the audio buffer
-            thd_buf.truncate(0);
+            let frame = ThdFrameHeader::from_bytes(&pkt_slice).unwrap();
+            if frame.has_major_sync {
+                packet_queue.truncate(0);
+                frame_queue.truncate(0);
+            }
+            packet_queue.push(packet);
+            frame_queue.push(frame);
 
             // increase THD frame counter
             num_frames += 1;
         }
     }
 
+    let decoded_frames = decode_thd(audio_stream, packet_queue)
+        .into_iter()
+        .zip(frame_queue.into_iter())
+        .map(|(d, h)| (d, h))
+        .collect();
+
     Ok(ThdSegment {
-        most_recent_frames: frame_queue.into_inner(),
+        last_group_of_frames: decoded_frames,
         num_frames,
         num_video_frames,
     })

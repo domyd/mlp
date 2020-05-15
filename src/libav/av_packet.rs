@@ -23,6 +23,12 @@ impl AVPacket {
     pub fn of_stream(&self, stream: &AVStream) -> bool {
         self.stream_index() == stream.index
     }
+
+    pub fn as_slice(&self) -> &[u8] {
+        let slice: &[u8] =
+            unsafe { std::slice::from_raw_parts((*self.pkt).data, (*self.pkt).size as usize) };
+        slice
+    }
 }
 
 impl Drop for AVPacket {
@@ -40,8 +46,7 @@ pub struct AVPacketReader<'packet> {
 
 impl<'packet> AVPacketReader<'_> {
     pub fn new(packet: &'packet AVPacket) -> AVPacketReader<'packet> {
-        let slice: &'packet [u8] =
-            unsafe { std::slice::from_raw_parts((*packet.pkt).data, (*packet.pkt).size as usize) };
+        let slice = packet.as_slice();
         AVPacketReader { data_slice: slice }
     }
 }

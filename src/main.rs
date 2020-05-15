@@ -58,8 +58,7 @@ fn main() -> std::io::Result<()> {
             dbg!(&segments);
 
             let mut writer = BufWriter::new(out_file);
-            let overrun =
-                libav::concat_thd_from_m2ts(&segments, &mut writer).unwrap();
+            let overrun = libav::concat_thd_from_m2ts(&segments, &mut writer).unwrap();
             dbg!(overrun.samples());
 
             // let frames: Vec<MlpFrame> = segments
