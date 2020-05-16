@@ -1,4 +1,3 @@
-use super::AVError;
 use ffmpeg4_ffi::sys as ff;
 
 pub struct AVFrame {
@@ -6,12 +5,12 @@ pub struct AVFrame {
 }
 
 impl AVFrame {
-    pub fn new() -> Result<AVFrame, AVError> {
+    pub fn new() -> AVFrame {
         match unsafe { ff::av_frame_alloc().as_mut() } {
-            Some(frame) => Ok(AVFrame {
+            Some(frame) => AVFrame {
                 frame: frame as *mut ff::AVFrame,
-            }),
-            None => Err(AVError::FFMpegErr(-1)),
+            },
+            None => panic!("ffmpeg failed to allocate AVFrame."),
         }
     }
 

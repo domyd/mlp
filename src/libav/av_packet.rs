@@ -29,6 +29,10 @@ impl AVPacket {
             unsafe { std::slice::from_raw_parts((*self.pkt).data, (*self.pkt).size as usize) };
         slice
     }
+
+    pub fn data_len(&self) -> usize {
+        unsafe { (*self.pkt).size as usize }
+    }
 }
 
 impl Drop for AVPacket {
