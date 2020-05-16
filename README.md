@@ -44,18 +44,11 @@ cargo run
 
 ## TODO list
 
-[] Blu-ray playlist support
-
-[] Better console/log output
-
-[] Better/more relevant stats at the end of demuxing
-
-[] Performance optimization
-
-[] Improve `info` command, support .m2ts files
-
-[] Better CLI help output
-
-[] More tests
-
-[] Support Linux and macOS
+- [ ] Blu-ray playlist support
+- [ ] Better console/log output
+- [ ] Better/more relevant stats at the end of demuxing
+- [ ] Performance optimization
+- [ ] Improve `info` command, support .m2ts files
+- [ ] Better CLI help output
+- [ ] More tests
+- [ ] Support Linux and macOS
