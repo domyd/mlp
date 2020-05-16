@@ -52,9 +52,10 @@ fn main() -> std::io::Result<()> {
                                 .value_name("SEGMENT-LIST"),
                         )
                         .arg(
-                            Arg::with_name("dgdemux-segment-list")
-                                .about("Sets the list of segments, in DGDemux's format.")
-                                .long("dgdemux-segment-list")
+                            Arg::with_name("segment-files")
+                                .about("Sets the list of .m2ts files names, separated by +.")
+                                .long("segment-files")
+                                .value_delimiter("+")
                                 .value_name("SEGMENT-LIST")
                                 .group("segment-list-group")
                                 .takes_value(true),
@@ -90,7 +91,7 @@ fn main() -> std::io::Result<()> {
                             s.parse::<i32>().map_err(|_| String::from("Must be a number."))
                         })
                         .global(true)
-                        .about("Determines the sensitivity of the TrueHD frame comparer. Defaults to 1024.")
+                        .about("Determines the sensitivity of the TrueHD frame comparer.")
                         .long_about(
 "This value determines when two samples can be considered equal 
 for the purposes of checking whether two TrueHD frames contain 
@@ -197,9 +198,11 @@ contain different audio.
                             values.map(|s| s.parse::<u16>()).collect();
                         let vn: Vec<u16> = values.unwrap();
                         Some(vn)
-                    } else if let Some(dg_list) = sub.value_of("dgdemux-segment-list") {
-                        let values: Vec<u16> = dgdemux::parse_segment_string(dg_list).unwrap();
-                        Some(values)
+                    } else if let Some(values) = sub.values_of("segment-files") {
+                        let values: Result<Vec<u16>, _> =
+                            values.map(|s| s.replace(".m2ts", "").parse::<u16>()).collect();
+                        let vn: Vec<u16> = values.unwrap();
+                        Some(vn)
                     } else {
                         // can't happen, clap makes sure of that
                         None
@@ -261,22 +264,6 @@ contain different audio.
             Ok(())
         }
         _ => Ok(()),
-    }
-}
-
-mod dgdemux {
-    pub fn parse_segment_string(list_str: &str) -> Result<Vec<u16>, std::num::ParseIntError> {
-        list_str
-            .split('+')
-            .map(|x| x.replace(".m2ts", "").parse::<u16>())
-            .collect()
-    }
-
-    #[test]
-    fn dgdemux_segment_map_test() {
-        let dgd = "00055.m2ts+00056.m2ts+00086.m2ts+00058.m2ts+00074.m2ts";
-        let expect: Vec<u16> = vec![55, 56, 86, 58, 74];
-        assert_eq!(expect, parse_segment_string(dgd).unwrap());
     }
 }
 
