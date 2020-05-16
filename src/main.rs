@@ -110,13 +110,13 @@ contain different audio.
         .subcommand(
             App::new("info")
                 .about("Prints information about the TrueHD stream.")
-                .arg("-s, --stream <FILE> 'The TrueHD stream.'"),
+                .arg(Arg::with_name("stream").value_name("STREAM").required(true)),
         )
         .subcommand(
             App::new("ff")
                 .arg("-i, --input <FILE>")
                 .arg("-h, --head 'print first frame'")
-                .arg("-t, --tail 'print last frame'"),
+                .arg("-t, --tail 'print last frame'")
         )
         .arg(
             Arg::with_name("verbosity")
@@ -169,7 +169,7 @@ contain different audio.
         builder.build()
     };
     TermLogger::init(verbosity, logger_config, TerminalMode::Mixed).unwrap();
-    libav::log::configure_rust_log(ffmpeg_log_level);
+    libav::av_log::configure_rust_log(ffmpeg_log_level);
 
     match args.subcommand() {
         ("demux", Some(sub)) => match sub.subcommand() {
@@ -214,14 +214,19 @@ contain different audio.
                     let segment_paths: Vec<&Path> =
                         segment_paths.iter().map(|p| p.as_path()).collect();
 
-                    let mut writer = BufWriter::new(out_file);
-                    let demux_opts = DemuxOptions {
-                        audio_match_threshold: threshold,
-                    };
-                    let overrun =
-                        libav::demux_thd(&segment_paths, &demux_opts, &mut writer).unwrap();
+                    {
+                        let mut writer = BufWriter::new(out_file);
+                        let demux_opts = DemuxOptions {
+                            audio_match_threshold: threshold,
+                        };
+                        let _overrun =
+                            libav::demux::demux_thd(&segment_paths, &demux_opts, &mut writer)
+                                .unwrap();
+                    }
+
+                    print_stream_info(PathBuf::from(&out_file_str).as_path())?;
                 } else {
-                    println!("segment list invalid.");
+                    error!("segment list invalid.");
                 }
 
                 Ok(())
@@ -246,10 +251,10 @@ contain different audio.
                     false => None,
                 },
             } {
-                println!("head: {}", head);
-                libav::thd_audio_read_test(&input_path, head, threshold);
+                debug!("head: {}", head);
+                libav::thd_audio_read_test(&input_path, head, threshold).unwrap();
             } else {
-                println!("wrong args");
+                error!("wrong args");
             }
 
             Ok(())
@@ -277,6 +282,8 @@ mod dgdemux {
 fn print_stream_info(filepath: &Path) -> std::io::Result<()> {
     let file = File::open(filepath)?;
 
+    info!("Counting output file frames ...");
+
     let mut num_frames = 0;
     let mut num_major_frames = 0;
     for frame in MlpIterator::new(BufReader::new(file)) {
@@ -288,24 +295,24 @@ fn print_stream_info(filepath: &Path) -> std::io::Result<()> {
 
     let duration = (num_frames * 40) as f64 / 48000_f64;
 
-    println!("Assuming 48 KHz sampling frequency and 40 samples per frame.");
-    println!(
+    info!("Assuming 48 KHz sampling frequency and 40 samples per frame.");
+    info!(
         "Total MLP frame count: {:>14}",
         num_frames.to_formatted_string(&Locale::en)
     );
-    println!(
+    info!(
         "  Major frames: {:>21}",
         num_major_frames.to_formatted_string(&Locale::en)
     );
-    println!(
+    info!(
         "  Minor frames: {:>21}",
         (num_frames - num_major_frames).to_formatted_string(&Locale::en)
     );
-    println!(
+    info!(
         "Number of audio samples: {:>12}",
         (num_frames * 40).to_formatted_string(&Locale::en)
     );
-    println!("Duration: {:>35.7} seconds", duration);
+    info!("Duration: {:>35.7} seconds", duration);
 
     Ok(())
 }
