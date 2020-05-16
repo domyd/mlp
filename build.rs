@@ -93,7 +93,7 @@ fn is_target_state(path: &Path) -> bool {
 
 fn download_ffmpeg(out_dir: &str, build_type: &str, version: &str) -> PathBuf {
     let url = reqwest::Url::parse(&format!(
-        "https://ffmpeg.zeranoe.com/builds/win64/{t}/ffmpeg-{v}-win64-{t}.zip",
+        "https://ffmpeg.zeranoe.com/builds/win64/{t}/ffmpeg-{v}-win64-{t}-lgpl.zip",
         t = build_type,
         v = version
     ))

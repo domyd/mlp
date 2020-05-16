@@ -139,6 +139,7 @@ contain different audio.
                 .takes_value(false)
                 .long("enable-ffmpeg-log")
         )
+        .after_help("This software uses libraries from the FFmpeg project under the LGPLv2.1.")
         .get_matches();
 
     let verbosity_level = args.occurrences_of("verbosity").min(3);
