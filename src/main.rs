@@ -17,10 +17,10 @@ fn main() -> std::io::Result<()> {
     let args = App::new("TrueHD Demuxer")
         .version("0.1")
         .author("Dominik Mydlil <dominik.mydlil@outlook.com>")
-        .about("Dolby TrueHD utility tool")
+        .about("A Dolby TrueHD demuxer and utility tool")
         .subcommand(
             App::new("demux")
-                .about("Demux THD stream from blu-ray files.")
+                .about("Demux TrueHD stream from blu-ray files.")
                 .subcommand(
                     App::new("playlist")
                         .about("Demux from a blu-ray playlist file.")
