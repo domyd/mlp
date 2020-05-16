@@ -74,7 +74,7 @@ impl AVFormatContext {
             return Err(AVError::FFMpegErr(err));
         }
         if unsafe { (*self.ctx).streams.is_null() } {
-            return Err(AVError::FFMpegErr(-1));
+            panic!("AVFormatContext.streams was null.");
         }
 
         let av_streams = unsafe {

@@ -1,8 +1,10 @@
-use clap::{App, Arg, ArgGroup};
+use clap::{App, Arg, ArgGroup, ArgSettings};
 use itertools::Itertools;
 use libav::DemuxOptions;
+use log::*;
 use mlp::{MlpFrame, MlpFrameReader, MlpIterator};
 use num_format::{Locale, ToFormattedString};
+use simplelog::*;
 use std::fs::File;
 use std::{
     io::{BufReader, BufWriter, Write},
@@ -80,14 +82,13 @@ fn main() -> std::io::Result<()> {
                         ),
                 )
                 .arg(
-                    Arg::with_name("audio-threshold")
+                    Arg::with_name("threshold")
                         .long("threshold")
                         .value_name("THRESHOLD")
                         .default_value("1024")
                         .validator(|s| {
                             s.parse::<i32>().map_err(|_| String::from("Must be a number."))
                         })
-                        .required(false)
                         .global(true)
                         .about("Determines the sensitivity of the TrueHD frame comparer. Defaults to 1024.")
                         .long_about(
@@ -101,7 +102,8 @@ the same audio. The default value of 1024 means that two frames
 would be considered equal. This should practically never lead 
 to false positives, as the deltas will be orders of magnitude 
 higher (in the hundreds of thousands range) in case two frames 
-contain different audio."
+contain different audio.
+"
                         ),
                 ),
         )
@@ -116,7 +118,58 @@ contain different audio."
                 .arg("-h, --head 'print first frame'")
                 .arg("-t, --tail 'print last frame'"),
         )
+        .arg(
+            Arg::with_name("verbosity")
+                .about("Sets the output verbosity.")
+                .global(true)
+                .setting(ArgSettings::MultipleOccurrences)
+                .short('v')
+        )
+        .arg(
+            Arg::with_name("ffmpeg-log")
+                .about("Enable FFmpeg log output.")
+                .long_about(
+"The verbosity of the FFmpeg log output will be determined from the -v flag: 
+    not set (0): info
+    -v      (1): verbose
+    -vv     (2): debug
+    -vvv    (3): trace
+")
+                .global(true)
+                .takes_value(false)
+                .long("enable-ffmpeg-log")
+        )
         .get_matches();
+
+    let verbosity_level = args.occurrences_of("verbosity").min(3);
+    let verbosity = match verbosity_level {
+        0 => LevelFilter::Info,
+        1 => LevelFilter::Debug,
+        2 => LevelFilter::Trace,
+        _ => LevelFilter::Off,
+    };
+
+    let ffmpeg_log_level = match verbosity_level {
+        0 => 32,
+        1 => 40,
+        2 => 48,
+        3 => 56,
+        _ => 32,
+    };
+
+    let logger_config = {
+        let mut builder = ConfigBuilder::new();
+        builder
+            .set_thread_level(LevelFilter::Off)
+            .set_target_level(LevelFilter::Off)
+            .set_time_to_local(true);
+        if !args.is_present("ffmpeg-log") {
+            builder.add_filter_ignore_str("ffmpeg");
+        }
+        builder.build()
+    };
+    TermLogger::init(verbosity, logger_config, TerminalMode::Mixed).unwrap();
+    libav::log::configure_rust_log(ffmpeg_log_level);
 
     match args.subcommand() {
         ("demux", Some(sub)) => match sub.subcommand() {
@@ -158,7 +211,8 @@ contain different audio."
                 });
 
                 if let Some(segment_paths) = segments {
-                    dbg!(&segment_paths);
+                    let segment_paths: Vec<&Path> =
+                        segment_paths.iter().map(|p| p.as_path()).collect();
 
                     let mut writer = BufWriter::new(out_file);
                     let demux_opts = DemuxOptions {
@@ -166,7 +220,6 @@ contain different audio."
                     };
                     let overrun =
                         libav::demux_thd(&segment_paths, &demux_opts, &mut writer).unwrap();
-                    dbg!(overrun.samples());
                 } else {
                     println!("segment list invalid.");
                 }
