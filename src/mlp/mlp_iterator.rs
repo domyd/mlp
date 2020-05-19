@@ -68,58 +68,63 @@ impl<R: Read> Iterator for MlpIterator<R> {
     }
 }
 
-#[test]
-fn iter_test_full() {
-    let iter = get_iter("assets/monstersuniversity-segment86-full.thd");
+mod tests {
+    use super::MlpIterator;
 
-    let mut num_major_frames = 0;
-    let mut num_frames = 0;
-    for frame in iter {
-        if frame.has_major_sync {
-            num_major_frames += 1;
+    // depends on local assets that I obviously can't check into source control
+    //#[test]
+    #[allow(dead_code)]
+    fn iter_test_full() {
+        let iter = get_iter("assets/monstersuniversity-segment86-full.thd");
+    
+        let mut num_major_frames = 0;
+        let mut num_frames = 0;
+        for frame in iter {
+            if frame.has_major_sync {
+                num_major_frames += 1;
+            }
+            num_frames += 1;
         }
-        num_frames += 1;
+        assert_eq!(17018, num_frames);
+        assert_eq!(135, num_major_frames);
     }
-    assert_eq!(17018, num_frames);
-    assert_eq!(135, num_major_frames);
-}
-
-#[test]
-fn iter_test_single() {
-    let iter = get_iter("assets/frozen2-segment55-frame1.bin");
-    let num_frames = iter.count();
-    assert_eq!(1, num_frames);
-}
-
-#[test]
-fn iter_test_none() {
-    let data: &[u8] = &[];
-    let iterator = MlpIterator::new(data);
-    let num_frames = iterator.count();
-    assert_eq!(0, num_frames);
-}
-
-#[test]
-fn iter_test_partial() {
-    let data: &[u8] = include_bytes!("../../assets/frozen2-segment55-frame1.bin");
-    let iterator = MlpIterator::new(&data[..500]);
-    let num_frames = iterator.count();
-    assert_eq!(0, num_frames);
-}
-
-#[cfg(test)]
-fn get_iter<P: AsRef<std::path::Path>>(
-    relative_path: P,
-) -> MlpIterator<std::io::BufReader<std::fs::File>> {
-    let path: std::path::PathBuf = {
-        let dir = env!("CARGO_MANIFEST_DIR");
-        let mut path_buf = std::path::PathBuf::from(dir);
-        path_buf.push(relative_path);
-        path_buf
-    };
-
-    let file = std::fs::File::open(path).unwrap();
-    let reader = std::io::BufReader::new(file);
-    let iterator = MlpIterator::new(reader);
-    iterator
+    
+    #[test]
+    fn iter_test_single() {
+        let iter = get_iter("assets/truehd-major-frame.bin");
+        let num_frames = iter.count();
+        assert_eq!(1, num_frames);
+    }
+    
+    #[test]
+    fn iter_test_none() {
+        let data: &[u8] = &[];
+        let iterator = MlpIterator::new(data);
+        let num_frames = iterator.count();
+        assert_eq!(0, num_frames);
+    }
+    
+    #[test]
+    fn iter_test_partial() {
+        let data: &[u8] = include_bytes!("../../assets/truehd-major-frame.bin");
+        let iterator = MlpIterator::new(&data[..500]);
+        let num_frames = iterator.count();
+        assert_eq!(0, num_frames);
+    }
+    
+    fn get_iter<P: AsRef<std::path::Path>>(
+        relative_path: P,
+    ) -> MlpIterator<std::io::BufReader<std::fs::File>> {
+        let path: std::path::PathBuf = {
+            let dir = env!("CARGO_MANIFEST_DIR");
+            let mut path_buf = std::path::PathBuf::from(dir);
+            path_buf.push(relative_path);
+            path_buf
+        };
+    
+        let file = std::fs::File::open(path).unwrap();
+        let reader = std::io::BufReader::new(file);
+        let iterator = MlpIterator::new(reader);
+        iterator
+    }   
 }

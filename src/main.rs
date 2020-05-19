@@ -88,12 +88,13 @@ fn main() -> std::io::Result<()> {
                         .value_name("THRESHOLD")
                         .default_value("1024")
                         .validator(|s| {
-                            s.parse::<i32>().map_err(|_| String::from("Must be a number."))
+                            s.parse::<i32>()
+                                .map_err(|_| String::from("Must be a number."))
                         })
                         .global(true)
                         .about("Determines the sensitivity of the TrueHD frame comparer.")
                         .long_about(
-"This value determines when two samples can be considered equal 
+                            "This value determines when two samples can be considered equal 
 for the purposes of checking whether two TrueHD frames contain 
 the same audio. The default value of 1024 means that two frames
 
@@ -104,7 +105,7 @@ would be considered equal. This should practically never lead
 to false positives, as the deltas will be orders of magnitude 
 higher (in the hundreds of thousands range) in case two frames 
 contain different audio.
-"
+",
                         ),
                 ),
         )
@@ -117,28 +118,29 @@ contain different audio.
             App::new("ff")
                 .arg("-i, --input <FILE>")
                 .arg("-h, --head 'print first frame'")
-                .arg("-t, --tail 'print last frame'")
+                .arg("-t, --tail 'print last frame'"),
         )
         .arg(
             Arg::with_name("verbosity")
                 .about("Sets the output verbosity.")
                 .global(true)
                 .setting(ArgSettings::MultipleOccurrences)
-                .short('v')
+                .short('v'),
         )
         .arg(
             Arg::with_name("ffmpeg-log")
                 .about("Enable FFmpeg log output.")
                 .long_about(
-"The verbosity of the FFmpeg log output will be determined from the -v flag: 
+                    "The verbosity of the FFmpeg log output will be determined from the -v flag: 
     not set (0): info
     -v      (1): verbose
     -vv     (2): debug
     -vvv    (3): trace
-")
+",
+                )
                 .global(true)
                 .takes_value(false)
-                .long("enable-ffmpeg-log")
+                .long("enable-ffmpeg-log"),
         )
         .after_help("This software uses libraries from the FFmpeg project under the LGPLv2.1.")
         .get_matches();
@@ -199,8 +201,9 @@ contain different audio.
                         let vn: Vec<u16> = values.unwrap();
                         Some(vn)
                     } else if let Some(values) = sub.values_of("segment-files") {
-                        let values: Result<Vec<u16>, _> =
-                            values.map(|s| s.replace(".m2ts", "").parse::<u16>()).collect();
+                        let values: Result<Vec<u16>, _> = values
+                            .map(|s| s.replace(".m2ts", "").parse::<u16>())
+                            .collect();
                         let vn: Vec<u16> = values.unwrap();
                         Some(vn)
                     } else {
