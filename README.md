@@ -8,6 +8,15 @@ Dual-licensed under MIT and Apache 2.0.
 You can download the latest binaries from the release page of this repository.
 
 ## Usage
+Demux the TrueHD stream from a given blu-ray playlist file, optionally with the given `<ANGLE>`, and save it to `<OUT-FILE>`:
+```powershell
+mlp demux playlist [<ANGLE>] <PLAYLIST-FILE> <OUT-FILE>
+# Example:
+# mlp demux playlist "F:\BDMV\PLAYLIST\00800.mpls" out.thd
+# mlp demux playlist -angle 2 "F:\BDMV\PLAYLIST\00800.mpls" out.thd
+```
+> NOTE: The angle index is 1-based.
+
 Demux the TrueHD stream from a list of `.m2ts` files, which are located in `<STEAM-DIR>`, and save it to `<OUT-FILE>`. The segments are given either by a comma-separated `<SEGMENT-MAP>`, or a `+`-separated list of `.m2ts` file names:
 ```powershell
 mlp demux segments -s <STREAM-DIR> -o <OUT-FILE> -l <SEGMENT-MAP>
@@ -25,8 +34,6 @@ mlp info <TRUEHD-FILE>
 ```
 > NOTE: This doesn't currently work for .m2ts files. You must supply a demuxed TrueHD stream.
 
-Demuxing from a playlist file is coming soon!
-
 ## FAQ
 ### Aren't there already other demuxing tools out there?
 Absolutely. However, all of them fail in [different](https://www.makemkv.com/forum/viewtopic.php?f=6&t=21513&p=84453#p84453) [ways](http://rationalqm.us/board/viewtopic.php?p=10841#p10841) on TrueHD streams, especially on discs that contain a large number of segments, which has resulted in desync and noticeable audio artifacts. This tool aims to be a perfectly accurate TrueHD demuxer that doesn't produce invalid, broken, or out-of-sync streams.
@@ -40,11 +47,11 @@ $env:INCLUDE="$(Get-Location)\external\ffmpeg\include"
 cargo run
 ```
 
-⚠ Note: Downloads the ffmpeg 4.2.2 LGPL binaries and library files from the internet during the build phase.
+> NOTE: Downloads the ffmpeg 4.2.2 LGPL binaries and library files from the internet during the build phase.
 
 ## TODO list
 
-- [ ] Blu-ray playlist support
+- [X] Blu-ray playlist support
 - [ ] Better console/log output
 - [ ] Better/more relevant stats at the end of demuxing
 - [ ] Performance optimization

@@ -3,6 +3,7 @@ use itertools::Itertools;
 use libav::DemuxOptions;
 use log::*;
 use mlp::{MlpFrame, MlpFrameReader, MlpIterator};
+use mpls::Mpls;
 use num_format::{Locale, ToFormattedString};
 use simplelog::*;
 use std::fs::File;
@@ -10,6 +11,7 @@ use std::{
     io::{BufReader, BufWriter, Write},
     path::{Path, PathBuf},
 };
+
 pub mod libav;
 pub mod mlp;
 
@@ -35,6 +37,17 @@ fn main() -> std::io::Result<()> {
                                 .about("Sets the output TrueHD file.")
                                 .value_name("OUTPUT-FILE")
                                 .required(true),
+                        )
+                        .arg(
+                            Arg::with_name("angle")
+                                .about("Sets the playlist angle index, which is 1-based.")
+                                .long("angle")
+                                .default_value("1")
+                                .value_name("ANGLE")
+                                .validator(|s| {
+                                    s.parse::<i32>()
+                                        .map_err(|_| String::from("Must be a number."))
+                                }),
                         ),
                 )
                 .subcommand(
@@ -177,8 +190,68 @@ contain different audio.
 
     match args.subcommand() {
         ("demux", Some(sub)) => match sub.subcommand() {
-            ("playlist", Some(_)) => {
-                println!("Not yet implemented, sorry!");
+            ("playlist", Some(sub)) => {
+                let out_file_str: &str = sub.value_of("output").unwrap();
+                let out_file = File::create(out_file_str)
+                    .expect(format!("Failed to create file '{0}'.", out_file_str).as_ref());
+
+                let mpls_path = PathBuf::from(sub.value_of("playlist").unwrap());
+                let angle_arg = sub
+                    .value_of("angle")
+                    .map(|s| s.parse::<i32>().unwrap())
+                    .map(|n| n.max(1) - 1)
+                    .unwrap();
+
+                let mpls_file = File::open(&mpls_path)?;
+                let mpls = Mpls::from(mpls_file).expect("failed to parse MPLS file.");
+
+                let angles = mpls.angles();
+                info!("playlist has {} angles.", angles.len());
+                info!("selected angle {}.", angle_arg + 1);
+                let selected_angle = match angles.get(angle_arg as usize) {
+                    None => {
+                        error!("Angle {} doesn't exist in this playlist.", angle_arg + 1);
+                        return Ok(());
+                    }
+                    Some(a) => a,
+                };
+
+                let stream_dir = {
+                    let mut p = mpls_path.clone();
+                    p.pop();
+                    p.pop();
+                    p.push("STREAM");
+                    p
+                };
+
+                let threshold = sub
+                    .value_of("threshold")
+                    .map(|s| s.parse::<i32>().unwrap())
+                    .unwrap();
+
+                let segment_paths: Vec<PathBuf> = selected_angle
+                    .segments()
+                    .iter()
+                    .map(|s| {
+                        let mut path = stream_dir.clone();
+                        path.push(&s.file_name);
+                        path.set_extension("m2ts");
+                        path
+                    })
+                    .collect();
+                let segment_paths: Vec<&Path> = segment_paths.iter().map(|p| p.as_path()).collect();
+
+                {
+                    let mut writer = BufWriter::new(out_file);
+                    let demux_opts = DemuxOptions {
+                        audio_match_threshold: threshold,
+                    };
+                    let _overrun =
+                        libav::demux::demux_thd(&segment_paths, &demux_opts, &mut writer).unwrap();
+                }
+
+                print_stream_info(PathBuf::from(&out_file_str).as_path())?;
+
                 Ok(())
             }
             ("segments", Some(sub)) => {
