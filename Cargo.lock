@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "mlp"
-version = "0.1.0"
+version = "0.3.0-preview"
 dependencies = [
  "clap 3.0.0-beta.1",
  "crc",

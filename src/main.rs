@@ -1,4 +1,4 @@
-use clap::{App, Arg, ArgGroup, ArgSettings};
+use clap::{App, Arg, ArgGroup, ArgSettings, crate_version};
 use itertools::Itertools;
 use libav::DemuxOptions;
 use log::*;
@@ -17,7 +17,7 @@ pub mod mlp;
 
 fn main() -> std::io::Result<()> {
     let args = App::new("TrueHD Demuxer")
-        .version("0.1")
+        .version(crate_version!())
         .author("Dominik Mydlil <dominik.mydlil@outlook.com>")
         .about("A Dolby TrueHD demuxer and utility tool")
         .subcommand(
@@ -29,21 +29,25 @@ fn main() -> std::io::Result<()> {
                         .arg(
                             Arg::with_name("playlist")
                                 .about("Sets the path to the playlist file (.mpls).")
-                                .value_name("PLAYLIST-FILE")
+                                .value_name("PLAYLIST")
                                 .required(true),
                         )
                         .arg(
                             Arg::with_name("output")
                                 .about("Sets the output TrueHD file.")
-                                .value_name("OUTPUT-FILE")
+                                .short('o')
+                                .long("output")
+                                .value_name("OUTPUT")
+                                .takes_value(true)
                                 .required(true),
                         )
                         .arg(
                             Arg::with_name("angle")
-                                .about("Sets the playlist angle index, which is 1-based.")
+                                .about("Sets the playlist angle index, starting at 1.")
                                 .long("angle")
                                 .default_value("1")
                                 .value_name("ANGLE")
+                                .required(false)
                                 .validator(|s| {
                                     s.parse::<i32>()
                                         .map_err(|_| String::from("Must be a number."))
@@ -127,12 +131,6 @@ contain different audio.
                 .about("Prints information about the TrueHD stream.")
                 .arg(Arg::with_name("stream").value_name("STREAM").required(true)),
         )
-        .subcommand(
-            App::new("ff")
-                .arg("-i, --input <FILE>")
-                .arg("-h, --head 'print first frame'")
-                .arg("-t, --tail 'print last frame'"),
-        )
         .arg(
             Arg::with_name("verbosity")
                 .about("Sets the output verbosity.")
@@ -152,7 +150,6 @@ contain different audio.
 ",
                 )
                 .global(true)
-                .takes_value(false)
                 .long("enable-ffmpeg-log"),
         )
         .after_help("This software uses libraries from the FFmpeg project under the LGPLv2.1.")
@@ -316,27 +313,6 @@ contain different audio.
         ("info", Some(sub)) => {
             let path = PathBuf::from(sub.value_of("stream").unwrap());
             print_stream_info(path.as_path())?;
-            Ok(())
-        }
-        ("ff", Some(sub)) => {
-            let input_path = PathBuf::from(sub.value_of("input").unwrap());
-            let threshold = sub
-                .value_of("threshold")
-                .map(|s| s.parse::<i32>().unwrap())
-                .unwrap();
-            if let Some(head) = match sub.is_present("head") {
-                true => Some(true),
-                false => match sub.is_present("tail") {
-                    true => Some(false),
-                    false => None,
-                },
-            } {
-                debug!("head: {}", head);
-                libav::thd_audio_read_test(&input_path, head, threshold).unwrap();
-            } else {
-                error!("wrong args");
-            }
-
             Ok(())
         }
         _ => Ok(()),
