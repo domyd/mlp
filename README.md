@@ -13,7 +13,7 @@ Demux the TrueHD stream from a given blu-ray playlist file, optionally with the 
 mlp demux playlist [<ANGLE>] <PLAYLIST-FILE> <OUT-FILE>
 # Example:
 # mlp demux playlist "F:\BDMV\PLAYLIST\00800.mpls" out.thd
-# mlp demux playlist -angle 2 "F:\BDMV\PLAYLIST\00800.mpls" out.thd
+# mlp demux playlist --angle 2 "F:\BDMV\PLAYLIST\00800.mpls" out.thd
 ```
 > NOTE: The angle index is 1-based.
 

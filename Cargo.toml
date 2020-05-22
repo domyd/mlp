@@ -1,6 +1,6 @@
 [package]
 name = "mlp"
-version = "0.1.0"
+version = "0.3.0-preview"
 authors = ["Madeleine Seifert <me@domy.dev>"]
 edition = "2018"
 
