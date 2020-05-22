@@ -1,5 +1,6 @@
 use super::{AVCodecContext, AVError, AVPacket};
 use ffmpeg4_ffi::sys as ff;
+use std::path::Path;
 
 pub struct AVFormatContext {
     ctx: *mut ff::AVFormatContext,
@@ -49,8 +50,9 @@ pub struct AVCodecParameters {
 }
 
 impl AVFormatContext {
-    pub fn new(input_path: &str) -> Result<Self, AVError> {
-        let input_path_cstr = std::ffi::CString::new(input_path).unwrap();
+    pub fn new<P: AsRef<Path>>(input_path: P) -> Result<Self, AVError> {
+        let input_path_cstr =
+            std::ffi::CString::new(input_path.as_ref().to_str().unwrap()).unwrap();
         let mut avctx = unsafe { ff::avformat_alloc_context() };
         let open_result = unsafe {
             ff::avformat_open_input(

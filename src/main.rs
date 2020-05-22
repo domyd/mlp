@@ -1,14 +1,13 @@
-use clap::{App, Arg, ArgGroup, ArgSettings, crate_version};
-use itertools::Itertools;
+use clap::{crate_version, App, Arg, ArgGroup, ArgSettings};
 use libav::DemuxOptions;
 use log::*;
-use mlp::{MlpFrame, MlpFrameReader, MlpIterator};
+use mlp::MlpIterator;
 use mpls::Mpls;
 use num_format::{Locale, ToFormattedString};
 use simplelog::*;
 use std::fs::File;
 use std::{
-    io::{BufReader, BufWriter, Write},
+    io::{BufReader, BufWriter},
     path::{Path, PathBuf},
 };
 
@@ -34,12 +33,12 @@ fn main() -> std::io::Result<()> {
                         )
                         .arg(
                             Arg::with_name("output")
-                                .about("Sets the output TrueHD file.")
+                                .long_about("Sets the output TrueHD file. If omitted, playlist info will be printed instead.")
                                 .short('o')
                                 .long("output")
                                 .value_name("OUTPUT")
                                 .takes_value(true)
-                                .required(true),
+                                .required(false),
                         )
                         .arg(
                             Arg::with_name("angle")
@@ -70,7 +69,7 @@ fn main() -> std::io::Result<()> {
                         )
                         .arg(
                             Arg::with_name("segment-files")
-                                .about("Sets the list of .m2ts files names, separated by +.")
+                                .about("Sets the list of file names, separated by +.")
                                 .long("segment-files")
                                 .value_delimiter("+")
                                 .value_name("SEGMENT-LIST")
@@ -139,6 +138,13 @@ contain different audio.
                 .short('v'),
         )
         .arg(
+            Arg::with_name("force")
+                .about("Overwrite existing output files.")
+                .global(true)
+                .long("force")
+                .short('f'),
+        )
+        .arg(
             Arg::with_name("ffmpeg-log")
                 .about("Enable FFmpeg log output.")
                 .long_about(
@@ -155,171 +161,192 @@ contain different audio.
         .after_help("This software uses libraries from the FFmpeg project under the LGPLv2.1.")
         .get_matches();
 
+    let force = args.is_present("force");
     let verbosity_level = args.occurrences_of("verbosity").min(3);
-    let verbosity = match verbosity_level {
-        0 => LevelFilter::Info,
-        1 => LevelFilter::Debug,
-        2 => LevelFilter::Trace,
-        _ => LevelFilter::Off,
-    };
+    let log_ffmpeg = args.is_present("ffmpeg-log");
 
-    let ffmpeg_log_level = match verbosity_level {
-        0 => 32,
-        1 => 40,
-        2 => 48,
-        3 => 56,
-        _ => 32,
-    };
-
-    let logger_config = {
-        let mut builder = ConfigBuilder::new();
-        builder
-            .set_thread_level(LevelFilter::Off)
-            .set_target_level(LevelFilter::Off)
-            .set_time_to_local(true);
-        if !args.is_present("ffmpeg-log") {
-            builder.add_filter_ignore_str("ffmpeg");
-        }
-        builder.build()
-    };
-    TermLogger::init(verbosity, logger_config, TerminalMode::Mixed).unwrap();
-    libav::av_log::configure_rust_log(ffmpeg_log_level);
+    setup_logging(verbosity_level as i32, log_ffmpeg);
 
     match args.subcommand() {
-        ("demux", Some(sub)) => match sub.subcommand() {
-            ("playlist", Some(sub)) => {
-                let out_file_str: &str = sub.value_of("output").unwrap();
-                let out_file = File::create(out_file_str)
-                    .expect(format!("Failed to create file '{0}'.", out_file_str).as_ref());
+        ("demux", Some(sub)) => {
+            let threshold = sub
+                .value_of("threshold")
+                .map(|s| s.parse::<i32>().unwrap())
+                .unwrap();
 
-                let mpls_path = PathBuf::from(sub.value_of("playlist").unwrap());
-                let angle_arg = sub
-                    .value_of("angle")
-                    .map(|s| s.parse::<i32>().unwrap())
-                    .map(|n| n.max(1) - 1)
-                    .unwrap();
-
-                let mpls_file = File::open(&mpls_path)?;
-                let mpls = Mpls::from(mpls_file).expect("failed to parse MPLS file.");
-
-                let angles = mpls.angles();
-                info!("playlist has {} angles.", angles.len());
-                info!("selected angle {}.", angle_arg + 1);
-                let selected_angle = match angles.get(angle_arg as usize) {
-                    None => {
-                        error!("Angle {} doesn't exist in this playlist.", angle_arg + 1);
-                        return Ok(());
-                    }
-                    Some(a) => a,
-                };
-
-                let stream_dir = {
-                    let mut p = mpls_path.clone();
-                    p.pop();
-                    p.pop();
-                    p.push("STREAM");
-                    p
-                };
-
-                let threshold = sub
-                    .value_of("threshold")
-                    .map(|s| s.parse::<i32>().unwrap())
-                    .unwrap();
-
-                let segment_paths: Vec<PathBuf> = selected_angle
-                    .segments()
-                    .iter()
-                    .map(|s| {
-                        let mut path = stream_dir.clone();
-                        path.push(&s.file_name);
-                        path.set_extension("m2ts");
-                        path
-                    })
-                    .collect();
-                let segment_paths: Vec<&Path> = segment_paths.iter().map(|p| p.as_path()).collect();
-
-                {
-                    let mut writer = BufWriter::new(out_file);
-                    let demux_opts = DemuxOptions {
-                        audio_match_threshold: threshold,
+            match sub.subcommand() {
+                ("playlist", Some(sub)) => {
+                    let mpls_path = sub
+                        .value_of("playlist")
+                        .map(|p| PathBuf::from(p))
+                        .expect("invalid MPLS path");
+                    // find the blu-ray STREAM directory, relative to the
+                    // playlist path
+                    let stream_dir = {
+                        let mut p = mpls_path.clone();
+                        p.pop();
+                        p.pop();
+                        p.push("STREAM");
+                        p
                     };
-                    let _overrun =
-                        libav::demux::demux_thd(&segment_paths, &demux_opts, &mut writer).unwrap();
-                }
+                    // turn angle into a 0-based index internally
+                    let user_did_supply_angle = sub.occurrences_of("angle") > 0;
+                    let angle_arg = sub
+                        .value_of("angle")
+                        .map(|s| s.parse::<i32>().unwrap())
+                        .map(|n| n.max(1) - 1)
+                        .unwrap();
 
-                print_stream_info(PathBuf::from(&out_file_str).as_path())?;
+                    if let Some(output_path) = sub.value_of("output").map(|p| PathBuf::from(p)) {
+                        let segment_paths = {
+                            let file = File::open(&mpls_path)?;
+                            let mpls = Mpls::from(file).expect("failed to parse MPLS file.");
+                            let angles = mpls.angles();
+                            if angles.len() > 1 && !user_did_supply_angle {
+                                warn!("This playlist contains more than one angle, but you did not select an angle with --angle. Using the default angle 1 ...");
+                            }
+                            let selected_angle = match angles.get(angle_arg as usize) {
+                                None => {
+                                    error!(
+                                        "Angle {} doesn't exist in this playlist.",
+                                        angle_arg + 1
+                                    );
+                                    return Ok(());
+                                }
+                                Some(a) => a,
+                            };
 
-                Ok(())
-            }
-            ("segments", Some(sub)) => {
-                let out_file_str: &str = sub.value_of("output").unwrap();
-                let out_file = File::create(out_file_str)
-                    .expect(format!("Failed to create file '{0}'.", out_file_str).as_ref());
+                            debug!(
+                                "Playlist has {} {}.",
+                                angles.len(),
+                                if angles.len() > 1 { "angles" } else { "angle" }
+                            );
+                            debug!("Using angle {}.", angle_arg + 1);
 
-                let src_dir_str: &str = sub.value_of("stream-dir").unwrap();
-                let src_dir_buf = PathBuf::from(src_dir_str);
+                            let segment_paths: Vec<PathBuf> = selected_angle
+                                .segments()
+                                .iter()
+                                .map(|s| {
+                                    let mut path = stream_dir.clone();
+                                    path.push(&s.file_name);
+                                    path.set_extension("m2ts");
+                                    path
+                                })
+                                .collect();
+                            segment_paths
+                        };
 
-                let threshold = sub
-                    .value_of("threshold")
-                    .map(|s| s.parse::<i32>().unwrap())
-                    .unwrap();
+                        if let Some(file) =
+                            file_create_with_force_check(&output_path, force).transpose()?
+                        {
+                            let writer = BufWriter::new(file);
+                            let demux_opts = DemuxOptions {
+                                audio_match_threshold: threshold,
+                            };
+                            let _overrun =
+                                libav::demux::demux_thd(&segment_paths, &demux_opts, writer)
+                                    .unwrap();
 
-                let segments: Option<Vec<PathBuf>> = {
-                    if let Some(values) = sub.values_of("segment-list") {
-                        let values: Result<Vec<u16>, _> =
-                            values.map(|s| s.parse::<u16>()).collect();
-                        let vn: Vec<u16> = values.unwrap();
-                        Some(vn)
-                    } else if let Some(values) = sub.values_of("segment-files") {
-                        let values: Result<Vec<u16>, _> = values
-                            .map(|s| s.replace(".m2ts", "").parse::<u16>())
-                            .collect();
-                        let vn: Vec<u16> = values.unwrap();
-                        Some(vn)
+                            let fc = count_thd_frames(&output_path)?;
+                            print_frame_count_info(fc);
+                        }
                     } else {
-                        // can't happen, clap makes sure of that
-                        None
+                        let mpls = {
+                            let f = File::open(&mpls_path)?;
+                            Mpls::from(f).expect("failed to parse MPLS file.")
+                        };
+                        print_playlist_info(&mpls);
                     }
+
+                    Ok(())
                 }
-                .map(|s| {
-                    s.iter()
-                        .map(|x| get_path_for_segment(*x, src_dir_buf.as_path()))
-                        .collect()
-                });
+                ("segments", Some(sub)) => {
+                    let output_path = sub.value_of("output").map(|p| PathBuf::from(p)).unwrap();
+                    let source_dir_path = sub
+                        .value_of("stream-dir")
+                        .map(|p| PathBuf::from(p))
+                        .unwrap();
 
-                if let Some(segment_paths) = segments {
-                    let segment_paths: Vec<&Path> =
-                        segment_paths.iter().map(|p| p.as_path()).collect();
+                    let segments: Vec<PathBuf> = {
+                        if let Some(values) = sub.values_of("segment-list") {
+                            values
+                                .map(|s| {
+                                    s.parse::<u16>()
+                                        .expect("segment list must only contain numbers.")
+                                })
+                                .map(|s| {
+                                    let mut p = source_dir_path.clone();
+                                    p.push(format!("{:0>5}.m2ts", s));
+                                    p
+                                })
+                                .collect()
+                        } else if let Some(values) = sub.values_of("segment-files") {
+                            values
+                                .map(|s| {
+                                    let mut p = source_dir_path.clone();
+                                    p.push(s);
+                                    p
+                                })
+                                .collect()
+                        } else {
+                            // can't happen, clap makes sure of that
+                            return Ok(());
+                        }
+                    };
 
+                    if let Some(file) =
+                        file_create_with_force_check(&output_path, force).transpose()?
                     {
-                        let mut writer = BufWriter::new(out_file);
+                        let mut writer = BufWriter::new(file);
                         let demux_opts = DemuxOptions {
                             audio_match_threshold: threshold,
                         };
                         let _overrun =
-                            libav::demux::demux_thd(&segment_paths, &demux_opts, &mut writer)
-                                .unwrap();
+                            libav::demux::demux_thd(&segments, &demux_opts, &mut writer).unwrap();
+
+                        let fc = count_thd_frames(&output_path)?;
+                        print_frame_count_info(fc);
                     }
 
-                    print_stream_info(PathBuf::from(&out_file_str).as_path())?;
-                } else {
-                    error!("segment list invalid.");
+                    Ok(())
                 }
-
-                Ok(())
+                _ => Ok(()),
             }
-            _ => Ok(()),
-        },
+        }
         ("info", Some(sub)) => {
-            let path = PathBuf::from(sub.value_of("stream").unwrap());
-            print_stream_info(path.as_path())?;
+            let path = sub.value_of("stream").map(|p| PathBuf::from(p)).unwrap();
+            let frame_count = count_thd_frames(&path).unwrap();
+            print_frame_count_info(frame_count);
             Ok(())
         }
         _ => Ok(()),
     }
 }
 
-fn print_stream_info(filepath: &Path) -> std::io::Result<()> {
+fn file_create_with_force_check<P: AsRef<Path>>(
+    path: P,
+    force: bool,
+) -> Option<Result<File, std::io::Error>> {
+    match (path.as_ref().exists(), force) {
+        (true, true) => {
+            warn!(
+                "Overwriting existing output file {}.",
+                path.as_ref().display()
+            );
+            Some(File::create(&path))
+        }
+        (true, false) => {
+            warn!(
+                "Output file {} already exists. Use the --force to overwrite existing output files.",
+                path.as_ref().display()
+            );
+            None
+        }
+        (false, _) => Some(File::create(&path)),
+    }
+}
+
+fn count_thd_frames<P: AsRef<Path>>(filepath: P) -> std::io::Result<(i32, i32)> {
     let file = File::open(filepath)?;
 
     info!("Counting output file frames ...");
@@ -332,6 +359,12 @@ fn print_stream_info(filepath: &Path) -> std::io::Result<()> {
         }
         num_frames += 1;
     }
+
+    Ok((num_frames, num_major_frames))
+}
+
+fn print_frame_count_info(counter: (i32, i32)) {
+    let (num_frames, num_major_frames) = counter;
 
     let duration = (num_frames * 40) as f64 / 48000_f64;
 
@@ -353,38 +386,63 @@ fn print_stream_info(filepath: &Path) -> std::io::Result<()> {
         (num_frames * 40).to_formatted_string(&Locale::en)
     );
     info!("Duration: {:>35.7} seconds", duration);
-
-    Ok(())
 }
 
-#[allow(dead_code)]
-fn write_mlp_frames<W: Write>(
-    frames: &[MlpFrame],
-    src_dir: &Path,
-    writer: &mut W,
-) -> std::io::Result<()> {
-    let mut frames_by_segment: Vec<(u16, Vec<&MlpFrame>)> = Vec::new();
-    for (key, group) in &frames.into_iter().group_by(|f| f.segment) {
-        frames_by_segment.push((key, group.collect()));
-    }
-
-    for (segment, frames) in frames_by_segment {
-        let path = get_path_for_segment(segment, src_dir);
-        let file = File::open(path).unwrap();
-        let mut reader = BufReader::new(file);
-
-        for f in frames {
-            let mut f_reader = MlpFrameReader::new(f, &mut reader);
-            std::io::copy(&mut f_reader, writer).map(|_| ())?;
+fn print_playlist_info(playlist: &Mpls) {
+    let n_segments = playlist.play_list.play_items.len();
+    let angles = playlist.angles();
+    let n_angles = angles.len();
+    info!(
+        "Playlist contains {} segments and {} angle{}.",
+        n_segments,
+        n_angles,
+        if n_angles > 1 { "s" } else { "" }
+    );
+    for angle in angles {
+        let segment_numbers: Vec<i32> = angle
+            .segments()
+            .iter()
+            .map(|s| s.file_name.parse::<i32>().unwrap())
+            .collect();
+        if n_angles > 1 {
+            info!(
+                "Segments for angle {}: {:?}",
+                angle.index + 1,
+                segment_numbers
+            );
+        } else {
+            info!("Segments: {:?}", segment_numbers);
         }
     }
-
-    Ok(())
 }
 
-fn get_path_for_segment(segment: u16, src_dir: &Path) -> PathBuf {
-    let mut buf = PathBuf::from(src_dir);
-    let filename = format!("{:0>5}.m2ts", segment);
-    buf.push(filename);
-    buf
+fn setup_logging(verbosity_level: i32, log_ffmpeg: bool) {
+    let verbosity = match verbosity_level {
+        0 => LevelFilter::Info,
+        1 => LevelFilter::Debug,
+        2 => LevelFilter::Trace,
+        _ => LevelFilter::Off,
+    };
+
+    let ffmpeg_log_level = match verbosity_level {
+        0 => 32,
+        1 => 40,
+        2 => 48,
+        3 => 56,
+        _ => 32,
+    };
+
+    let logger_config = {
+        let mut builder = ConfigBuilder::new();
+        builder
+            .set_thread_level(LevelFilter::Off)
+            .set_target_level(LevelFilter::Off)
+            .set_time_to_local(true);
+        if !log_ffmpeg {
+            builder.add_filter_ignore_str("ffmpeg");
+        }
+        builder.build()
+    };
+    TermLogger::init(verbosity, logger_config, TerminalMode::Mixed).unwrap();
+    libav::av_log::configure_rust_log(ffmpeg_log_level);
 }
