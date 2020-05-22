@@ -1,35 +1,32 @@
 use super::{
     truehd, AVCodecType, AVError, AVFormatContext, AVFrame, AVPacket, AVStream, DecodedThdFrame,
-    DemuxErr, OtherErr, ThdFrameHeader, ThdOverrun, ThdSegment,
+    DemuxErr, ThdFrameHeader, ThdOverrun, ThdSegment,
 };
 use log::{debug, info, trace, warn};
 use std::{
     io::{Seek, SeekFrom, Write},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 pub struct DemuxOptions {
     pub audio_match_threshold: i32,
 }
 
-pub fn demux_thd<W: Write + Seek>(
-    files: &[&Path],
+pub fn demux_thd<W: Write + Seek, P: AsRef<Path>>(
+    files: &[P],
     options: &DemuxOptions,
-    out_writer: &mut W,
+    mut out_writer: W,
 ) -> Result<ThdOverrun, AVError> {
     let mut overrun_acc = ThdOverrun { acc: 0.0 };
     let mut previous_segment: Option<ThdSegment> = None;
 
     let file_count = files.len();
-    for (i, &file) in files.iter().enumerate() {
-        let file_path = file
-            .to_str()
-            .ok_or(OtherErr::FilePathIsNotUtf8(PathBuf::from(file)))?;
+    for (i, file_path) in files.iter().enumerate() {
         info!(
             "Processing file {}/{} ('{}') ...",
             i + 1,
             file_count,
-            file_path
+            file_path.as_ref().display()
         );
 
         // check overrun and apply sync, if necessary
@@ -53,7 +50,7 @@ pub fn demux_thd<W: Write + Seek>(
                     None => {
                         warn!(
                             "No TrueHD frames found in {}. This segment will be skipped.",
-                            file_path
+                            file_path.as_ref().display()
                         );
                         continue;
                     }
@@ -79,7 +76,7 @@ pub fn demux_thd<W: Write + Seek>(
                     if let Some((_, header)) = prev.last_group_of_frames.last() {
                         // delete the most recently written frame by moving the file
                         // cursor back
-                        out_writer
+                        &out_writer
                             .seek(SeekFrom::Current(-(header.length as i64)))
                             .unwrap();
                         overrun_acc.sub_frames(1);
@@ -109,7 +106,7 @@ pub fn demux_thd<W: Write + Seek>(
                 if head.matches_approximately(tail, options.audio_match_threshold) {
                     // delete the most recently written frame by moving the file
                     // cursor back
-                    out_writer
+                    &out_writer
                         .seek(SeekFrom::Current(-(tail_header.length as i64)))
                         .unwrap();
                     overrun_acc.sub_frames(1);
@@ -139,7 +136,7 @@ pub fn demux_thd<W: Write + Seek>(
             &avctx,
             video_stream,
             thd_stream,
-            out_writer,
+            &mut out_writer,
         )?);
 
         // adjust overrun
@@ -162,7 +159,7 @@ fn write_thd_segment<W: Write + Seek>(
     format_context: &AVFormatContext,
     video_stream: &AVStream,
     audio_stream: &AVStream,
-    thd_writer: &mut W,
+    mut thd_writer: W,
 ) -> Result<ThdSegment, AVError> {
     let (mut num_frames, mut num_video_frames) = (0u32, 0u32);
 
@@ -181,7 +178,7 @@ fn write_thd_segment<W: Write + Seek>(
         } else if packet.of_stream(audio_stream) {
             // copy the TrueHD frame to the output
             let pkt_slice = packet.as_slice();
-            thd_writer.write_all(&pkt_slice)?;
+            &thd_writer.write_all(&pkt_slice)?;
 
             // push frame header to queue (we want to remember the last
             // n frame headers we saw)
