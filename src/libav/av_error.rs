@@ -1,5 +1,5 @@
 use log::error;
-use std::{io, path::PathBuf};
+use std::{fmt::Display, io, path::PathBuf};
 
 #[derive(Debug)]
 pub enum AVError {
@@ -41,20 +41,24 @@ impl From<io::Error> for AVError {
 
 impl AVError {
     pub fn log(&self) {
+        error!("{}", self);
+    }
+}
+
+impl std::error::Error for AVError {}
+
+impl Display for AVError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AVError::IoErr(e) => {
-                error!("{}", e.to_string());
-            }
-            AVError::FFMpegErr(i) => {
-                error!("ffmpeg error code: {}", i);
-            }
+            AVError::IoErr(e) => write!(f, "{}", e),
+            AVError::FFMpegErr(i) => write!(f, "ffmpeg error code: {}", i),
             AVError::DemuxErr(e) => {
                 let msg = match e {
                     DemuxErr::NoTrueHdStreamFound => "No TrueHD stream found.",
                     DemuxErr::NoVideoStreamFound => "No video stream found.",
                     DemuxErr::NoTrueHdFramesEncountered => "No TrueHD frames encountered.",
                 };
-                error!("{}", msg);
+                write!(f, "{}", msg)
             }
             AVError::OtherErr(e) => {
                 let msg = match e {
@@ -62,7 +66,7 @@ impl AVError {
                         format!("File path is not valid UTF-8: {}", path.to_string_lossy())
                     }
                 };
-                error!("{}", msg);
+                write!(f, "{}", msg)
             }
         }
     }
