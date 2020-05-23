@@ -107,8 +107,8 @@ impl AVFormatContext {
     }
 
     pub fn read_frame(&self) -> Result<AVPacket, AVError> {
-        let packet = AVPacket::new()?;
-        match unsafe { ff::av_read_frame(self.ctx, packet.pkt) } {
+        let mut packet = AVPacket::new();
+        match unsafe { ff::av_read_frame(self.ctx, &mut packet.pkt) } {
             0 => Ok(packet),
             err => Err(AVError::FFMpegErr(err)),
         }

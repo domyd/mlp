@@ -1,23 +1,25 @@
-use super::{AVError, AVStream};
+use super::AVStream;
 use ffmpeg4_ffi::sys as ff;
 use std::io::Read;
+use std::mem::MaybeUninit;
 
 pub struct AVPacket {
-    pub pkt: *mut ff::AVPacket,
+    pub pkt: ff::AVPacket,
 }
 
 impl AVPacket {
-    pub fn new() -> Result<AVPacket, AVError> {
-        let pkt = unsafe { ff::av_packet_alloc() };
-        if pkt.is_null() {
-            Err(AVError::FFMpegErr(1))
-        } else {
-            Ok(AVPacket { pkt })
+    /// Allocates a new `AVPacket` on the stack.
+    pub fn new() -> AVPacket {
+        let mut pkt = MaybeUninit::<ff::AVPacket>::uninit();
+        unsafe {
+            ff::av_init_packet(pkt.as_mut_ptr());
         }
+        let pkt = unsafe { pkt.assume_init() };
+        AVPacket { pkt }
     }
 
     pub fn stream_index(&self) -> i32 {
-        unsafe { (*self.pkt).stream_index }
+        self.pkt.stream_index
     }
 
     pub fn of_stream(&self, stream: &AVStream) -> bool {
@@ -26,20 +28,19 @@ impl AVPacket {
 
     pub fn as_slice(&self) -> &[u8] {
         let slice: &[u8] =
-            unsafe { std::slice::from_raw_parts((*self.pkt).data, (*self.pkt).size as usize) };
+            unsafe { std::slice::from_raw_parts(self.pkt.data, self.pkt.size as usize) };
         slice
     }
 
     pub fn data_len(&self) -> usize {
-        unsafe { (*self.pkt).size as usize }
+        self.pkt.size as usize
     }
 }
 
 impl Drop for AVPacket {
     fn drop(&mut self) {
         unsafe {
-            ff::av_packet_unref(self.pkt);
-            ff::av_packet_free(&mut self.pkt);
+            ff::av_packet_unref(&mut self.pkt);
         }
     }
 }
