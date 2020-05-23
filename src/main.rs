@@ -296,12 +296,12 @@ contain different audio.
                     if let Some(file) =
                         file_create_with_force_check(&output_path, force).transpose()?
                     {
-                        let mut writer = BufWriter::new(file);
+                        let writer = BufWriter::new(file);
                         let demux_opts = DemuxOptions {
                             audio_match_threshold: threshold,
                         };
                         let _overrun =
-                            libav::demux::demux_thd(&segments, &demux_opts, &mut writer).unwrap();
+                            libav::demux::demux_thd(&segments, &demux_opts, writer).unwrap();
 
                         let fc =
                             count_thd_frames(&output_path).expect("failed to count TrueHD frames");
