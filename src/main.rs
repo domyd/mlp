@@ -1,18 +1,16 @@
 use clap::{crate_version, App, Arg, ArgGroup, ArgSettings};
-use libav::DemuxOptions;
 use log::*;
-use mlp::MlpIterator;
 use mpls::Mpls;
 use num_format::{Locale, ToFormattedString};
 use simplelog::*;
 use std::fs::File;
 use std::{
-    io::{BufReader, BufWriter},
+    io::{BufWriter},
     path::{Path, PathBuf},
 };
+use libav::DemuxOptions;
 
 pub mod libav;
-pub mod mlp;
 
 fn main() -> std::io::Result<()> {
     let args = App::new("TrueHD Demuxer")
@@ -247,7 +245,8 @@ contain different audio.
                                 libav::demux::demux_thd(&segment_paths, &demux_opts, writer)
                                     .unwrap();
 
-                            let fc = count_thd_frames(&output_path)?;
+                            let fc = count_thd_frames(&output_path)
+                                .expect("failed to count TrueHD frames");
                             print_frame_count_info(fc);
                         }
                     } else {
@@ -304,7 +303,8 @@ contain different audio.
                         let _overrun =
                             libav::demux::demux_thd(&segments, &demux_opts, &mut writer).unwrap();
 
-                        let fc = count_thd_frames(&output_path)?;
+                        let fc =
+                            count_thd_frames(&output_path).expect("failed to count TrueHD frames");
                         print_frame_count_info(fc);
                     }
 
@@ -346,18 +346,25 @@ fn file_create_with_force_check<P: AsRef<Path>>(
     }
 }
 
-fn count_thd_frames<P: AsRef<Path>>(filepath: P) -> std::io::Result<(i32, i32)> {
-    let file = File::open(filepath)?;
-
+fn count_thd_frames<P: AsRef<Path>>(filepath: P) -> Result<(i32, i32), libav::AVError> {
     info!("Counting output file frames ...");
 
-    let mut num_frames = 0;
-    let mut num_major_frames = 0;
-    for frame in MlpIterator::new(BufReader::new(file)) {
-        if frame.has_major_sync {
-            num_major_frames += 1;
+    let avctx = libav::AVFormatContext::open(&filepath)?;
+    let streams = avctx.get_streams()?;
+    let thd_stream = streams
+        .iter()
+        .find(|&s| s.codec_id() == ffmpeg4_ffi::sys::AVCodecID_AV_CODEC_ID_TRUEHD)
+        .ok_or(libav::DemuxErr::NoTrueHdStreamFound)?;
+
+    let (mut num_frames, mut num_major_frames) = (0i32, 0i32);
+    while let Ok(packet) = avctx.read_frame() {
+        if packet.of_stream(&thd_stream) {
+            let frame = libav::ThdFrameHeader::from_bytes(&packet.as_slice()).unwrap();
+            if frame.has_major_sync {
+                num_major_frames += 1;
+            }
+            num_frames += 1;
         }
-        num_frames += 1;
     }
 
     Ok((num_frames, num_major_frames))
