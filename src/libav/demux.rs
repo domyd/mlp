@@ -39,7 +39,7 @@ pub fn demux_thd<W: Write + Seek, P: AsRef<Path>>(
             let (tail, tail_header) = { prev.last_group_of_frames.last().unwrap() };
             let head = {
                 // open the current segment and decode only the first TrueHD frame
-                let avctx = AVFormatContext::new(&file_path)?;
+                let avctx = AVFormatContext::open(&file_path)?;
                 let streams = avctx.get_streams()?;
                 let thd_stream = streams
                     .iter()
@@ -120,7 +120,7 @@ pub fn demux_thd<W: Write + Seek, P: AsRef<Path>>(
 
         debug!("Overrun is now {} samples.", overrun_acc.samples());
         debug!("Copying TrueHD stream to output ...");
-        let avctx = AVFormatContext::new(file_path)?;
+        let avctx = AVFormatContext::open(file_path)?;
         let streams = avctx.get_streams()?;
 
         let video_stream = streams

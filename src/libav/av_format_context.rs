@@ -50,7 +50,7 @@ pub struct AVCodecParameters {
 }
 
 impl AVFormatContext {
-    pub fn new<P: AsRef<Path>>(input_path: P) -> Result<Self, AVError> {
+    pub fn open<P: AsRef<Path>>(input_path: P) -> Result<Self, AVError> {
         let input_path_cstr =
             std::ffi::CString::new(input_path.as_ref().to_str().unwrap()).unwrap();
         let mut avctx = unsafe { ff::avformat_alloc_context() };
