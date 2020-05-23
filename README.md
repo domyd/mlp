@@ -90,8 +90,9 @@ cargo build
 ## TODO list
 
 - [x] Blu-ray playlist support
+- [x] Support all framerates and sample rates
 - [ ] Better console/log output
-- [ ] Better/more relevant stats at the end of demuxing
+- [x] Better/more relevant stats at the end of demuxing
 - [ ] Performance optimization
 - [x] Improve `info` command, support .m2ts files
 - [x] Better CLI help output

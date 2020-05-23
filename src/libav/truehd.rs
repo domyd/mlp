@@ -1,4 +1,4 @@
-use super::{AVError, AVFrame, AVPacket, AVStream};
+use super::{AVError, AVFrame, AVPacket, AVStream, MediaDuration, VideoMetadata};
 use std::{
     convert::TryInto,
     ops::{Add, AddAssign},
@@ -6,7 +6,7 @@ use std::{
 
 /// Decodes the given packets from the stream.
 pub fn decode(stream: &AVStream, packets: Vec<AVPacket>) -> Result<Vec<DecodedThdFrame>, AVError> {
-    if stream.codec_id() != ffmpeg4_ffi::sys::AVCodecID_AV_CODEC_ID_TRUEHD {
+    if stream.codec.id != ffmpeg4_ffi::sys::AVCodecID_AV_CODEC_ID_TRUEHD {
         panic!("attempted to decode a non-TrueHD stream.");
     }
 
@@ -82,13 +82,25 @@ impl ThdSample {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct ThdMetadata {
+    pub channels: u8,
+    pub sample_rate: u32,
+    pub frame_size: u8,
+}
+
 pub struct DecodedThdFrame {
     pub samples: Vec<ThdSample>,
-    pub num_channels: u8,
+    pub metadata: ThdMetadata,
 }
 
 impl DecodedThdFrame {
-    pub fn new(bytes: &[u8], bytes_per_sample: usize, channels: u8) -> DecodedThdFrame {
+    pub fn new(
+        bytes: &[u8],
+        bytes_per_sample: usize,
+        channels: u8,
+        sample_rate: u32,
+    ) -> DecodedThdFrame {
         let samples: Vec<ThdSample> = bytes
             .chunks_exact(bytes_per_sample)
             .enumerate()
@@ -98,7 +110,11 @@ impl DecodedThdFrame {
             .collect();
         DecodedThdFrame {
             samples,
-            num_channels: channels,
+            metadata: ThdMetadata {
+                channels,
+                sample_rate,
+                frame_size: (sample_rate / 1200) as u8,
+            },
         }
     }
 
@@ -131,24 +147,20 @@ pub struct ThdSegment {
     pub last_group_of_frames: Vec<(DecodedThdFrame, ThdFrameHeader)>,
     pub num_frames: u32,
     pub num_video_frames: u32,
+    pub thd_metadata: ThdMetadata,
+    pub video_metadata: VideoMetadata,
 }
 
 impl ThdSegment {
-    pub fn audio_duration(&self) -> f64 {
-        // we're assuming 48 KHz here, which is usually
-        // true but doesn't have to be
-        // TODO
-        (self.num_frames * 40) as f64 / 48000_f64
+    pub fn overrun(&self) -> f64 {
+        self.thd_metadata.duration(self.num_frames)
+            - self.video_metadata.duration(self.num_video_frames)
     }
+}
 
-    pub fn video_duration(&self) -> f64 {
-        // we're assuming 23.976 fps here, which isn't always true
-        // TODO
-        (self.num_video_frames * 1001) as f64 / 24000_f64
-    }
-
-    pub fn audio_overrun(&self) -> f64 {
-        self.audio_duration() - self.video_duration()
+impl MediaDuration for ThdMetadata {
+    fn duration(&self, frames: u32) -> f64 {
+        (frames * self.frame_size as u32) as f64 / self.sample_rate as f64
     }
 }
 

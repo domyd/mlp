@@ -29,6 +29,10 @@ impl AVFrame {
         unsafe { ff::av_get_bytes_per_sample((*self.frame).format) as usize }
     }
 
+    pub fn sample_rate(&self) -> u32 {
+        unsafe { (*self.frame).sample_rate as u32 }
+    }
+
     pub fn channels(&self) -> u8 {
         unsafe { (*self.frame).channels as u8 }
     }

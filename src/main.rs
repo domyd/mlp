@@ -1,14 +1,14 @@
 use clap::{crate_version, App, Arg, ArgGroup, ArgSettings};
+use libav::{DemuxOptions, MediaDuration};
 use log::*;
 use mpls::Mpls;
 use num_format::{Locale, ToFormattedString};
 use simplelog::*;
 use std::fs::File;
 use std::{
-    io::{BufWriter},
+    io::BufWriter,
     path::{Path, PathBuf},
 };
-use libav::DemuxOptions;
 
 pub mod libav;
 
@@ -241,13 +241,10 @@ contain different audio.
                             let demux_opts = DemuxOptions {
                                 audio_match_threshold: threshold,
                             };
-                            let _overrun =
+                            let stats =
                                 libav::demux::demux_thd(&segment_paths, &demux_opts, writer)
                                     .unwrap();
-
-                            let fc = count_thd_frames(&output_path)
-                                .expect("failed to count TrueHD frames");
-                            print_frame_count_info(fc);
+                            print_demux_stats(&stats);
                         }
                     } else {
                         let mpls = {
@@ -300,12 +297,9 @@ contain different audio.
                         let demux_opts = DemuxOptions {
                             audio_match_threshold: threshold,
                         };
-                        let _overrun =
+                        let stats =
                             libav::demux::demux_thd(&segments, &demux_opts, writer).unwrap();
-
-                        let fc =
-                            count_thd_frames(&output_path).expect("failed to count TrueHD frames");
-                        print_frame_count_info(fc);
+                        print_demux_stats(&stats);
                     }
 
                     Ok(())
@@ -349,11 +343,11 @@ fn file_create_with_force_check<P: AsRef<Path>>(
 fn count_thd_frames<P: AsRef<Path>>(filepath: P) -> Result<(i32, i32), libav::AVError> {
     info!("Counting output file frames ...");
 
-    let avctx = libav::AVFormatContext::open(&filepath)?;
-    let streams = avctx.get_streams()?;
+    let mut avctx = libav::AVFormatContext::open(&filepath)?;
+    let streams = avctx.streams()?;
     let thd_stream = streams
         .iter()
-        .find(|&s| s.codec_id() == ffmpeg4_ffi::sys::AVCodecID_AV_CODEC_ID_TRUEHD)
+        .find(|&s| s.codec.id == ffmpeg4_ffi::sys::AVCodecID_AV_CODEC_ID_TRUEHD)
         .ok_or(libav::DemuxErr::NoTrueHdStreamFound)?;
 
     let (mut num_frames, mut num_major_frames) = (0i32, 0i32);
@@ -368,6 +362,51 @@ fn count_thd_frames<P: AsRef<Path>>(filepath: P) -> Result<(i32, i32), libav::AV
     }
 
     Ok((num_frames, num_major_frames))
+}
+
+fn print_demux_stats(stats: &libav::DemuxStats) {
+    let (video_frames, audio_frames) = stats
+        .segments
+        .iter()
+        .map(|s| (s.video_frames, s.thd_frames))
+        .fold((0, 0), |(va, aa), (v, a)| (va + v, aa + a));
+    let (video_meta, audio_meta) = (
+        stats.video_metadata().unwrap(),
+        stats.thd_metadata().unwrap(),
+    );
+    let (video_duration, audio_duration) = (
+        video_meta.duration(video_frames),
+        audio_meta.duration(audio_frames),
+    );
+
+    let target_audio_len = video_duration + stats.segments.last().unwrap().audio_overrun();
+    let samples_off_target = ((audio_duration - target_audio_len) * 48000f64).round() as i32;
+
+    info!(
+        "Video length: {:>16} frames ({:.7} seconds)",
+        video_frames.to_formatted_string(&Locale::en),
+        video_duration
+    );
+    info!(
+        "Audio length: {:>16} frames ({:.7} seconds)",
+        audio_frames.to_formatted_string(&Locale::en),
+        audio_duration
+    );
+    let print_alignment = 26 + target_audio_len.trunc().to_string().len();
+    info!(
+        "Target audio length: {:>a$.7} seconds",
+        target_audio_len,
+        a = print_alignment
+    );
+    info!(
+        "Audio samples off target: {:>4.0} {}",
+        samples_off_target,
+        match samples_off_target {
+            -40..=40 => "(🟢 perfect)",
+            -80..=80 => "(🟡 suboptimal)",
+            _ => "(🔴 please file issue)",
+        }
+    );
 }
 
 fn print_frame_count_info(counter: (i32, i32)) {
