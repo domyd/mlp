@@ -37,7 +37,7 @@ impl AVCodecContext {
 
     pub fn send_packet(&mut self, packet: &AVPacket) -> Result<(), AVError> {
         unsafe {
-            match ff::avcodec_send_packet(self.ctx, packet.pkt) {
+            match ff::avcodec_send_packet(self.ctx, &packet.pkt) {
                 0 => Ok(()),
                 i if i < 0 => Err(AVError::FFMpegErr(i)),
                 i => panic!(
