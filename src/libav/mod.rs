@@ -45,7 +45,7 @@ pub fn thd_audio_read_test(file: &PathBuf, head: bool, threshold: i32) -> Result
     let file_path = file
         .to_str()
         .ok_or(OtherErr::FilePathIsNotUtf8(PathBuf::from(file)))?;
-    let avctx = AVFormatContext::new(&file_path)?;
+    let avctx = AVFormatContext::open(&file_path)?;
     let streams = avctx.get_streams()?;
 
     info!("processing file '{}' ...", file_path);
