@@ -1,6 +1,7 @@
 use super::{
-    truehd, AVCodecType, AVError, AVFormatContext, AVFrame, AVPacket, AVStream, DecodedThdFrame,
-    DemuxErr, Framerate, MediaDuration, ThdFrameHeader, ThdOverrun, ThdSegment, VideoMetadata,
+    dsp, truehd, AVCodecType, AVError, AVFormatContext, AVFrame, AVPacket, AVStream,
+    DecodedThdFrame, DemuxErr, Framerate, MediaDuration, ThdDecodePacket, ThdFrameHeader,
+    ThdOverrun, ThdSegment, VideoMetadata,
 };
 use log::{debug, info, trace, warn};
 use std::{
@@ -8,10 +9,6 @@ use std::{
     path::Path,
 };
 use truehd::ThdMetadata;
-
-pub struct DemuxOptions {
-    pub audio_match_threshold: i32,
-}
 
 pub struct SegmentDemuxStats {
     pub video_frames: u32,
@@ -74,61 +71,55 @@ impl DemuxStats {
 }
 
 // returns the number of frames to cut off the end
-fn adjust_gap(
-    tail: &DecodedThdFrame,
-    head: &DecodedThdFrame,
-    overrun: &ThdOverrun,
-    demux_opts: &DemuxOptions,
-) -> u32 {
-    // if only one of them is silent, they almost certainly don't
-    // contain duplicated audio.
-    if head.is_silence(demux_opts.audio_match_threshold)
-        && tail.is_silence(demux_opts.audio_match_threshold)
-    {
-        // fallback to bresenham's algorithm, since we can't reliably
-        // match two silent audio frame against each other
+fn adjust_gap(tail: &ThdDecodePacket, head: &ThdDecodePacket, overrun: &ThdOverrun) -> u32 {
+    let head_mono = &head.mono;
+    let tail_mono = &tail.mono;
+
+    let head_samples: Vec<i32> = head_mono.samples.iter().map(|f| f.value).collect();
+    let tail_samples: Vec<i32> = tail_mono.samples.iter().map(|f| f.value).collect();
+
+    let silence_threshold = 100i32;
+    let head_max = head_samples.iter().map(|n| n.abs()).max().unwrap_or(0);
+    let tail_max = tail_samples.iter().map(|n| n.abs()).max().unwrap_or(0);
+
+    let covariance = dsp::covariance(&head_samples, &tail_samples);
+    debug!("Frame covariance is {}", covariance);
+
+    let adjust = if head_max < silence_threshold && tail_max < silence_threshold {
+        // We're dealing with a silent section here, which means the covariance
+        // value isn't going to be very significant. So we'll fall back to
+        // minimizing desync based on the overrun accumulator.
         debug!(
-                "Both frames at segment boundary appear to only contain silent audio. Falling back to overrun correction."
-            );
+            "Both frames at segment boundary appear to only contain silent audio. Falling back to overrun correction. (head max: {}, tail max: {})", 
+            head_max,
+            tail_max
+        );
+
         if overrun.samples() >= 20 {
             info!("Deleted silent frame to correct for audio sync drift.");
             1
         } else {
-            info!("Segment boundary is OK.");
             0
         }
     } else {
-        // do audio matching
-        debug!("Comparing audio content ...");
-
-        let max_distance = head.get_max_distance(tail);
-        debug!("Largest sample value difference: {}", max_distance);
-
-        // warn the user if two audio frames contain suspiciously similar
-        // audio which escaped the threshold
-        if max_distance > demux_opts.audio_match_threshold
-            && max_distance < demux_opts.audio_match_threshold * 5
-        {
-            warn!(
-                    "Audio content of these two frames is suspiciously similar, yet escapes your set threshold of {}. The maximum sample distance between these frames was {}. Consider manually verifying that these frames contain duplicate audio and perhaps adjust the threshold parameter.", 
-                    demux_opts.audio_match_threshold,
-                    max_distance);
-        }
-
-        if head.matches_approximately(tail, demux_opts.audio_match_threshold) {
+        if covariance > 0.99 {
             info!("Deleted frame with duplicate audio content.");
             1
         } else {
-            info!("Segment boundary is OK.");
-            debug!("No duplicate audio content found at segment boundary.");
+            debug!("No duplicate audio content at segment boundary.");
             0
         }
+    };
+
+    if adjust == 0 {
+        info!("Segment boundary is OK, no adjustment necessary.");
     }
+
+    adjust
 }
 
 pub fn demux_thd<W: Write + Seek, P: AsRef<Path>>(
     files: &[P],
-    options: &DemuxOptions,
     mut out_writer: W,
 ) -> Result<DemuxStats, AVError> {
     let mut stats: DemuxStats = DemuxStats {
@@ -173,13 +164,19 @@ pub fn demux_thd<W: Write + Seek, P: AsRef<Path>>(
                 }
             };
 
+            trace!("tail: {}", tail.original);
+            trace!("head: {}", head.original);
+
+            trace!("tail MONO: {}", tail.mono);
+            trace!("head MONO: {}", head.mono);
+
             let overrun = stats.overrun();
             debug!(
                 "Uncorrected overrun would be {} samples.",
                 overrun.samples()
             );
 
-            let n_delete = adjust_gap(&tail, &head, &overrun, &options);
+            let n_delete = adjust_gap(&tail, &head, &overrun);
             if n_delete > 0 {
                 // delete the most recently written frame by moving the file
                 // cursor back
@@ -239,7 +236,7 @@ fn write_thd_segment<W: Write + Seek>(
         get_thd_metadata(thd_stream),
     );
 
-    trace!("Video: {:?}, Audio: {:?}", video_metadata, thd_metadata);
+    debug!("Video: {:?}, Audio: {:?}", video_metadata, thd_metadata);
 
     let (mut num_frames, mut num_video_frames) = (0u32, 0u32);
 
@@ -304,7 +301,7 @@ fn write_thd_segment<W: Write + Seek>(
 pub fn decode_tail_frame(
     format_context: &mut AVFormatContext,
     stream: &AVStream,
-) -> Result<Option<DecodedThdFrame>, AVError> {
+) -> Result<Option<ThdDecodePacket>, AVError> {
     let mut packets: Vec<AVPacket> = Vec::with_capacity(128);
 
     while let Ok(packet) = format_context.read_frame() {
@@ -332,7 +329,7 @@ pub fn decode_tail_frame(
 pub fn decode_head_frame(
     format_context: &mut AVFormatContext,
     stream: &AVStream,
-) -> Result<Option<DecodedThdFrame>, AVError> {
+) -> Result<Option<ThdDecodePacket>, AVError> {
     let mut av_frame = AVFrame::new();
 
     let mut a_ctx = stream.get_codec_context()?;
@@ -345,7 +342,13 @@ pub fn decode_head_frame(
 
         a_ctx.decode_frame(&packet, &mut av_frame)?;
         let decoded_frame = DecodedThdFrame::from(&av_frame);
-        return Ok(Some(decoded_frame));
+        let mono_frame = truehd::downmix_mono(&av_frame, &a_ctx)?;
+        let decoded_mono_frame = DecodedThdFrame::from(&mono_frame);
+
+        return Ok(Some(ThdDecodePacket {
+            original: decoded_frame,
+            mono: decoded_mono_frame,
+        }));
     }
 
     return Ok(None);

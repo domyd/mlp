@@ -14,19 +14,26 @@ pub use av_format_context::{AVCodecType, AVFormatContext, AVStream};
 pub mod av_frame;
 pub use av_frame::AVFrame;
 
+pub mod av_resample;
+pub use av_resample::{SwrContext, SwrOptions};
+
 pub mod av_log;
 
 pub mod av_packet;
 pub use av_packet::AVPacket;
 
 pub mod truehd;
-pub use truehd::{DecodedThdFrame, ThdFrameHeader, ThdOverrun, ThdSample, ThdSegment};
+pub use truehd::{
+    DecodedThdFrame, ThdDecodePacket, ThdFrameHeader, ThdOverrun, ThdSample, ThdSegment,
+};
 
 pub mod demux;
-pub use demux::{DemuxOptions, DemuxStats};
+pub use demux::DemuxStats;
 
-impl From<&AVFrame> for DecodedThdFrame {
-    fn from(frame: &AVFrame) -> Self {
+pub mod dsp;
+
+impl<'a> From<&AVFrame<'a>> for DecodedThdFrame {
+    fn from(frame: &AVFrame<'a>) -> Self {
         let bytes = frame.as_slice();
         let bytes_per_sample = frame.bytes_per_sample();
         let sample_rate = frame.sample_rate();
@@ -63,7 +70,7 @@ fn print_frames(frames: &Vec<DecodedThdFrame>) {
 }
 
 // used for development and testing
-pub fn thd_audio_read_test(file: &PathBuf, head: bool, threshold: i32) -> Result<(), AVError> {
+pub fn thd_audio_read_test(file: &PathBuf, head: bool) -> Result<(), AVError> {
     let file_path = file
         .to_str()
         .ok_or(OtherErr::FilePathIsNotUtf8(PathBuf::from(file)))?;
@@ -80,8 +87,8 @@ pub fn thd_audio_read_test(file: &PathBuf, head: bool, threshold: i32) -> Result
     if head {
         match demux::decode_head_frame(&mut avctx, &audio_stream)? {
             Some(frame) => {
-                println!("is silence: {}", &frame.is_silence(threshold));
-                print_frames(&vec![frame]);
+                // println!("is silence: {}", &frame.original.is_silence(threshold));
+                print_frames(&vec![frame.original]);
             }
             None => {
                 println!("no frames encountered");
@@ -90,8 +97,8 @@ pub fn thd_audio_read_test(file: &PathBuf, head: bool, threshold: i32) -> Result
     } else {
         match demux::decode_tail_frame(&mut avctx, &audio_stream)? {
             Some(frame) => {
-                println!("is silence: {}", &frame.is_silence(threshold));
-                print_frames(&vec![frame]);
+                // println!("is silence: {}", &frame.original.is_silence(threshold));
+                print_frames(&vec![frame.original]);
             }
             None => {
                 println!("no frames encountered");
