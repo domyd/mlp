@@ -36,6 +36,8 @@ PS> mlp info "out.thd"
 PS> mlp info "00055.m2ts"
 ```
 
+All commands support `-v` or `-vv` for more verbose output.
+
 ## FAQ
 
 ### Aren't there already other demuxing tools out there?

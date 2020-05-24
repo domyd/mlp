@@ -147,15 +147,6 @@ fn main() -> std::io::Result<()> {
                         .value_of("playlist")
                         .map(|p| PathBuf::from(p))
                         .expect("invalid MPLS path");
-                    // find the blu-ray STREAM directory, relative to the
-                    // playlist path
-                    let stream_dir = {
-                        let mut p = mpls_path.clone();
-                        p.pop();
-                        p.pop();
-                        p.push("STREAM");
-                        p
-                    };
                     // turn angle into a 0-based index internally
                     let user_did_supply_angle = sub.occurrences_of("angle") > 0;
                     let angle_arg = sub
@@ -165,7 +156,7 @@ fn main() -> std::io::Result<()> {
                         .unwrap();
 
                     if let Some(output_path) = sub.value_of("output").map(|p| PathBuf::from(p)) {
-                        let segment_paths = {
+                        let segments = {
                             let file = File::open(&mpls_path)?;
                             let mpls = Mpls::from(file).expect("failed to parse MPLS file.");
                             let angles = mpls.angles();
@@ -190,24 +181,14 @@ fn main() -> std::io::Result<()> {
                             );
                             debug!("Using angle {}.", angle_arg + 1);
 
-                            let segment_paths: Vec<PathBuf> = selected_angle
-                                .segments()
-                                .iter()
-                                .map(|s| {
-                                    let mut path = stream_dir.clone();
-                                    path.push(&s.file_name);
-                                    path.set_extension("m2ts");
-                                    path
-                                })
-                                .collect();
-                            segment_paths
+                            get_segments(&mpls, &selected_angle, &mpls_path)
                         };
 
                         if let Some(file) =
                             file_create_with_force_check(&output_path, force).transpose()?
                         {
                             let writer = BufWriter::new(file);
-                            let stats = libav::demux::demux_thd(&segment_paths, writer).unwrap();
+                            let stats = libav::demux::demux_thd(&segments, writer).unwrap();
                             print_demux_stats(&stats);
                         }
                     } else {
@@ -227,7 +208,7 @@ fn main() -> std::io::Result<()> {
                         .map(|p| PathBuf::from(p))
                         .unwrap();
 
-                    let segments: Vec<PathBuf> = {
+                    let segments: Vec<Segment> = {
                         if let Some(values) = sub.values_of("segment-list") {
                             values
                                 .map(|s| {
@@ -239,6 +220,10 @@ fn main() -> std::io::Result<()> {
                                     p.push(format!("{:0>5}.m2ts", s));
                                     p
                                 })
+                                .map(|s| Segment {
+                                    path: s,
+                                    video_frames: None,
+                                })
                                 .collect()
                         } else if let Some(values) = sub.values_of("segment-files") {
                             values
@@ -246,6 +231,10 @@ fn main() -> std::io::Result<()> {
                                     let mut p = source_dir_path.clone();
                                     p.push(s);
                                     p
+                                })
+                                .map(|s| Segment {
+                                    path: s,
+                                    video_frames: None,
                                 })
                                 .collect()
                         } else {
@@ -322,6 +311,55 @@ fn count_thd_frames<P: AsRef<Path>>(filepath: P) -> Result<(i32, i32), libav::AV
     }
 
     Ok((num_frames, num_major_frames))
+}
+
+pub struct Segment {
+    pub path: PathBuf,
+    pub video_frames: Option<i32>,
+}
+
+fn get_segments(playlist: &Mpls, angle: &mpls::Angle, playlist_path: &PathBuf) -> Vec<Segment> {
+    // find the blu-ray STREAM directory, relative to the
+    // playlist path
+    let stream_dir = {
+        let mut p = playlist_path.clone();
+        p.pop();
+        p.pop();
+        p.push("STREAM");
+        p
+    };
+
+    let mut segments = Vec::new();
+    for play_item in &playlist.play_list.play_items {
+        let clip = play_item.clip_for_angle(angle);
+        let clip_path = {
+            let mut path = stream_dir.clone();
+            path.push(&clip.file_name);
+            path.set_extension("m2ts");
+            path
+        };
+        let video_frames = {
+            let len = play_item.out_time.seconds() - play_item.in_time.seconds();
+            let v_stream = play_item
+                .stream_number_table
+                .primary_video_streams
+                .first()
+                .unwrap();
+            let fps = match v_stream.attrs.stream_type {
+                mpls::StreamType::HdrVideo(_, f, _, _) => f.unwrap().fps(),
+                mpls::StreamType::SdrVideo(_, f) => f.unwrap().fps(),
+                _ => return Vec::new(),
+            };
+            Some((len * fps).round() as i32)
+        };
+
+        segments.push(Segment {
+            path: clip_path,
+            video_frames,
+        });
+    }
+
+    segments
 }
 
 fn print_demux_stats(stats: &libav::DemuxStats) {
