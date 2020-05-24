@@ -3,11 +3,9 @@ use super::{
     DecodedThdFrame, DemuxErr, Framerate, MediaDuration, ThdDecodePacket, ThdFrameHeader,
     ThdOverrun, ThdSegment, VideoMetadata,
 };
+use crate::Segment;
 use log::{debug, info, trace, warn};
-use std::{
-    io::{Seek, SeekFrom, Write},
-    path::Path,
-};
+use std::io::{Seek, SeekFrom, Write};
 use truehd::ThdMetadata;
 
 pub struct SegmentDemuxStats {
@@ -118,22 +116,22 @@ fn adjust_gap(tail: &ThdDecodePacket, head: &ThdDecodePacket, overrun: &ThdOverr
     adjust
 }
 
-pub fn demux_thd<W: Write + Seek, P: AsRef<Path>>(
-    files: &[P],
+pub fn demux_thd<W: Write + Seek>(
+    segments: &[Segment],
     mut out_writer: W,
 ) -> Result<DemuxStats, AVError> {
     let mut stats: DemuxStats = DemuxStats {
-        segments: Vec::with_capacity(files.len()),
+        segments: Vec::with_capacity(segments.len()),
     };
     let mut previous_segment: Option<ThdSegment> = None;
 
-    let file_count = files.len();
-    for (i, file_path) in files.iter().enumerate() {
+    let file_count = segments.len();
+    for (i, segment) in segments.iter().enumerate() {
         info!(
             "Processing file {}/{} ('{}') ...",
             i + 1,
             file_count,
-            file_path.as_ref().display()
+            segment.path.display()
         );
 
         // check overrun and apply sync, if necessary
@@ -146,7 +144,7 @@ pub fn demux_thd<W: Write + Seek, P: AsRef<Path>>(
             let (tail, tail_header) = { prev.last_group_of_frames.last().unwrap() };
             let head = {
                 // open the current segment and decode only the first TrueHD frame
-                let mut avctx = AVFormatContext::open(&file_path)?;
+                let mut avctx = AVFormatContext::open(&segment.path)?;
                 let streams = avctx.streams()?;
                 let thd_stream = streams
                     .iter()
@@ -157,7 +155,7 @@ pub fn demux_thd<W: Write + Seek, P: AsRef<Path>>(
                     None => {
                         warn!(
                             "No TrueHD frames found in {}. This segment will be skipped.",
-                            file_path.as_ref().display()
+                            segment.path.display()
                         );
                         continue;
                     }
@@ -190,7 +188,7 @@ pub fn demux_thd<W: Write + Seek, P: AsRef<Path>>(
 
         debug!("Overrun is now {} samples.", stats.overrun().samples());
         debug!("Copying TrueHD stream to output ...");
-        let mut avctx = AVFormatContext::open(file_path)?;
+        let mut avctx = AVFormatContext::open(&segment.path)?;
         let streams = avctx.streams()?;
 
         let video_stream = streams
@@ -202,7 +200,13 @@ pub fn demux_thd<W: Write + Seek, P: AsRef<Path>>(
             .find(|&s| s.codec.id == ffmpeg4_ffi::sys::AVCodecID_AV_CODEC_ID_TRUEHD)
             .ok_or(DemuxErr::NoTrueHdStreamFound)?;
 
-        let segment = write_thd_segment(&mut avctx, video_stream, thd_stream, &mut out_writer)?;
+        let segment = write_thd_segment(
+            &segment,
+            &mut avctx,
+            video_stream,
+            thd_stream,
+            &mut out_writer,
+        )?;
 
         let segment_overrun = ThdOverrun {
             acc: segment.overrun(),
@@ -226,6 +230,7 @@ pub fn demux_thd<W: Write + Seek, P: AsRef<Path>>(
 }
 
 fn write_thd_segment<W: Write + Seek>(
+    segment: &Segment,
     format_context: &mut AVFormatContext,
     video_stream: &AVStream,
     thd_stream: &AVStream,
@@ -272,15 +277,29 @@ fn write_thd_segment<W: Write + Seek>(
         }
     }
 
-    debug!("Encountered {} video frames.", num_video_frames);
-    debug!(
-        "{} TrueHD frames have been written to the output.",
-        num_frames
-    );
     trace!(
         "Last group of frames is {} frames long.",
         packet_queue.len()
     );
+    debug!(
+        "{} TrueHD frames have been written to the output.",
+        num_frames
+    );
+    debug!("Encountered {} video frames.", num_video_frames);
+
+    // ffmpeg sometimes has an issue with identifying the very first HEVC frame
+    // of a stream, which leads to a wrong frame count. So we cross-check that
+    // count against what the MPLS file says we _should_ have, and take the
+    // corrected count for calculating the overrun.
+    let corrected_video_frames = if let Some(n) = segment.video_frames {
+        if n as u32 != num_video_frames {
+            warn!("Counted {} frames, but expected {}. Using the expected number for calculating overrun.", 
+            num_video_frames, n);
+        }
+        n as u32
+    } else {
+        num_video_frames
+    };
 
     let decoded_frames = truehd::decode(thd_stream, packet_queue)?
         .into_iter()
@@ -291,7 +310,7 @@ fn write_thd_segment<W: Write + Seek>(
     Ok(ThdSegment {
         last_group_of_frames: decoded_frames,
         num_frames,
-        num_video_frames,
+        num_video_frames: corrected_video_frames,
         video_metadata,
         thd_metadata,
     })
