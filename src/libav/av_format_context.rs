@@ -105,7 +105,7 @@ impl AVFormatContext<'_> {
     }
 }
 
-impl<'a> Drop for AVFormatContext<'a> {
+impl Drop for AVFormatContext<'_> {
     fn drop(&mut self) {
         unsafe {
             let mut ctx: *mut ff::AVFormatContext = &mut *self.ctx;

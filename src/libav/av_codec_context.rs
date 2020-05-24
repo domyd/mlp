@@ -2,7 +2,7 @@ use super::{AVError, AVFrame, AVPacket, AVStream};
 use ffmpeg4_ffi::sys as ff;
 
 pub struct AVCodecContext<'a> {
-    ctx: &'a mut ff::AVCodecContext,
+    pub ctx: &'a mut ff::AVCodecContext,
 }
 
 impl AVCodecContext<'_> {
@@ -58,7 +58,7 @@ impl AVCodecContext<'_> {
     }
 }
 
-impl<'a> Drop for AVCodecContext<'a> {
+impl Drop for AVCodecContext<'_> {
     fn drop(&mut self) {
         unsafe {
             let mut ctx: *mut ff::AVCodecContext = &mut *self.ctx;

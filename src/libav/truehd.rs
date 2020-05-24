@@ -1,11 +1,20 @@
-use super::{AVError, AVFrame, AVPacket, AVStream, MediaDuration, VideoMetadata};
+use super::{
+    AVCodecContext, AVError, AVFrame, AVPacket, AVStream, MediaDuration, SwrContext, SwrOptions,
+    VideoMetadata,
+};
 use std::{
     convert::TryInto,
+    fmt::Display,
     ops::{Add, AddAssign},
 };
 
+pub struct ThdDecodePacket {
+    pub original: DecodedThdFrame,
+    pub mono: DecodedThdFrame,
+}
+
 /// Decodes the given packets from the stream.
-pub fn decode(stream: &AVStream, packets: Vec<AVPacket>) -> Result<Vec<DecodedThdFrame>, AVError> {
+pub fn decode(stream: &AVStream, packets: Vec<AVPacket>) -> Result<Vec<ThdDecodePacket>, AVError> {
     if stream.codec.id != ffmpeg4_ffi::sys::AVCodecID_AV_CODEC_ID_TRUEHD {
         panic!("attempted to decode a non-TrueHD stream.");
     }
@@ -20,14 +29,39 @@ pub fn decode(stream: &AVStream, packets: Vec<AVPacket>) -> Result<Vec<DecodedTh
     let mut a_ctx = stream.get_codec_context()?;
     a_ctx.open(&stream)?;
 
-    let mut frame_buf: Vec<DecodedThdFrame> = Vec::with_capacity(packets.len());
+    let mut frame_buf = Vec::with_capacity(packets.len());
     for packet in packets {
         a_ctx.decode_frame(&packet, &mut av_frame)?;
         let decoded_frame = DecodedThdFrame::from(&av_frame);
-        frame_buf.push(decoded_frame);
+        let mono_frame = downmix_mono(&av_frame, &a_ctx)?;
+        let decoded_mono_frame = DecodedThdFrame::from(&mono_frame);
+
+        frame_buf.push(ThdDecodePacket {
+            original: decoded_frame,
+            mono: decoded_mono_frame,
+        });
     }
 
     Ok(frame_buf)
+}
+
+pub fn downmix_mono<'a>(
+    frame: &'a AVFrame,
+    codec_ctx: &AVCodecContext,
+) -> Result<AVFrame<'a>, AVError> {
+    let opts = SwrOptions {
+        out_ch_layout: ffmpeg4_ffi::sys::AV_CH_LAYOUT_MONO as i64,
+        out_sample_rate: codec_ctx.ctx.sample_rate,
+        out_sample_fmt: codec_ctx.ctx.sample_fmt,
+        in_ch_layout: unsafe {
+            ffmpeg4_ffi::sys::av_get_default_channel_layout(codec_ctx.ctx.channels)
+        },
+        in_sample_rate: codec_ctx.ctx.sample_rate,
+        in_sample_fmt: codec_ctx.ctx.sample_fmt,
+    };
+    let mut au_convert_ctx = SwrContext::with_options(&opts).unwrap();
+    let output_frame = au_convert_ctx.convert_frame(&frame);
+    Ok(output_frame)
 }
 
 /// A very light-weight header that only contains a length and a flag of whether
@@ -59,6 +93,7 @@ impl ThdFrameHeader {
     }
 }
 
+#[derive(Debug)]
 pub struct ThdSample {
     // TODO: half the size of it by packing the 24 bit data with the 8 bit channel number
     // most significant byte (native endianness) contains the channel number as a u8,
@@ -89,9 +124,31 @@ pub struct ThdMetadata {
     pub frame_size: u8,
 }
 
+#[derive(Debug)]
 pub struct DecodedThdFrame {
     pub samples: Vec<ThdSample>,
     pub metadata: ThdMetadata,
+}
+
+impl Display for DecodedThdFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Format: {}", self.metadata)?;
+        for i in 0..self.metadata.channels {
+            let samples: Vec<i32> = self
+                .samples
+                .iter()
+                .filter_map(|f| if f.channel == i { Some(f.value) } else { None })
+                .collect();
+            writeln!(f, "ch {}, samples: {:?}", i, samples)?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for ThdMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({} Hz, {} ch)", self.sample_rate, self.channels)
+    }
 }
 
 impl DecodedThdFrame {
@@ -117,34 +174,10 @@ impl DecodedThdFrame {
             },
         }
     }
-
-    pub fn get_max_distance(&self, other: &Self) -> i32 {
-        let mut max_distance: i32 = 0;
-        for (l, r) in self.samples.iter().zip(other.samples.iter()) {
-            let diff = (l.value - r.value).abs();
-            max_distance = diff.max(max_distance);
-        }
-        max_distance
-    }
-
-    pub fn matches_approximately(&self, other: &Self, tolerance: i32) -> bool {
-        // TODO: this is a very naive algorithm, do better
-        for (l, r) in self.samples.iter().zip(other.samples.iter()) {
-            let diff = (l.value - r.value).abs();
-            if diff > tolerance {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    pub fn is_silence(&self, threshold: i32) -> bool {
-        self.samples.iter().all(|s| s.value.abs() < threshold)
-    }
 }
 
 pub struct ThdSegment {
-    pub last_group_of_frames: Vec<(DecodedThdFrame, ThdFrameHeader)>,
+    pub last_group_of_frames: Vec<(ThdDecodePacket, ThdFrameHeader)>,
     pub num_frames: u32,
     pub num_video_frames: u32,
     pub thd_metadata: ThdMetadata,

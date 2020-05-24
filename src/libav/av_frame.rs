@@ -1,17 +1,14 @@
 use ffmpeg4_ffi::sys as ff;
 
-pub struct AVFrame {
-    pub frame: *mut ff::AVFrame,
+pub struct AVFrame<'a> {
+    pub frame: &'a mut ff::AVFrame,
 }
 
-impl AVFrame {
-    pub fn new() -> AVFrame {
-        match unsafe { ff::av_frame_alloc().as_mut() } {
-            Some(frame) => AVFrame {
-                frame: frame as *mut ff::AVFrame,
-            },
-            None => panic!("ffmpeg failed to allocate AVFrame."),
-        }
+impl AVFrame<'_> {
+    pub fn new<'a>() -> AVFrame<'a> {
+        let frame =
+            unsafe { ff::av_frame_alloc().as_mut() }.expect("ffmpeg failed to allocate AVFrame.");
+        AVFrame { frame }
     }
 
     pub fn len(&self) -> usize {
@@ -30,15 +27,15 @@ impl AVFrame {
     }
 
     pub fn sample_rate(&self) -> u32 {
-        unsafe { (*self.frame).sample_rate as u32 }
+        self.frame.sample_rate as u32
     }
 
     pub fn channels(&self) -> u8 {
-        unsafe { (*self.frame).channels as u8 }
+        self.frame.channels as u8
     }
 
     pub fn samples(&self) -> u32 {
-        unsafe { (*self.frame).nb_samples as u32 }
+        self.frame.nb_samples as u32
     }
 
     pub fn as_slice<'a>(&'a self) -> &'a [u8] {
@@ -49,10 +46,11 @@ impl AVFrame {
     }
 }
 
-impl Drop for AVFrame {
+impl Drop for AVFrame<'_> {
     fn drop(&mut self) {
         unsafe {
-            ff::av_frame_free(&mut self.frame);
+            let mut frame: *mut ff::AVFrame = &mut *self.frame;
+            ff::av_frame_free(&mut frame);
         }
     }
 }

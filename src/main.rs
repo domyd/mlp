@@ -1,5 +1,5 @@
 use clap::{crate_version, App, Arg, ArgGroup, ArgSettings};
-use libav::{DemuxOptions, MediaDuration};
+use libav::MediaDuration;
 use log::*;
 use mpls::Mpls;
 use num_format::{Locale, ToFormattedString};
@@ -95,32 +95,6 @@ fn main() -> std::io::Result<()> {
                                 .requires("stream-dir")
                                 .required(true),
                         ),
-                )
-                .arg(
-                    Arg::with_name("threshold")
-                        .long("threshold")
-                        .value_name("THRESHOLD")
-                        .default_value("1024")
-                        .validator(|s| {
-                            s.parse::<i32>()
-                                .map_err(|_| String::from("Must be a number."))
-                        })
-                        .global(true)
-                        .about("Determines the sensitivity of the TrueHD frame comparer.")
-                        .long_about(
-                            "This value determines when two samples can be considered equal 
-for the purposes of checking whether two TrueHD frames contain 
-the same audio. The default value of 1024 means that two frames
-
-    frame 1: [-250282, -231928, -200182, ...]
-    frame 2: [-249876, -232048, -201012, ...]
-
-would be considered equal. This should practically never lead 
-to false positives, as the deltas will be orders of magnitude 
-higher (in the hundreds of thousands range) in case two frames 
-contain different audio.
-",
-                        ),
                 ),
         )
         .subcommand(
@@ -167,11 +141,6 @@ contain different audio.
 
     match args.subcommand() {
         ("demux", Some(sub)) => {
-            let threshold = sub
-                .value_of("threshold")
-                .map(|s| s.parse::<i32>().unwrap())
-                .unwrap();
-
             match sub.subcommand() {
                 ("playlist", Some(sub)) => {
                     let mpls_path = sub
@@ -238,12 +207,7 @@ contain different audio.
                             file_create_with_force_check(&output_path, force).transpose()?
                         {
                             let writer = BufWriter::new(file);
-                            let demux_opts = DemuxOptions {
-                                audio_match_threshold: threshold,
-                            };
-                            let stats =
-                                libav::demux::demux_thd(&segment_paths, &demux_opts, writer)
-                                    .unwrap();
+                            let stats = libav::demux::demux_thd(&segment_paths, writer).unwrap();
                             print_demux_stats(&stats);
                         }
                     } else {
@@ -294,11 +258,7 @@ contain different audio.
                         file_create_with_force_check(&output_path, force).transpose()?
                     {
                         let writer = BufWriter::new(file);
-                        let demux_opts = DemuxOptions {
-                            audio_match_threshold: threshold,
-                        };
-                        let stats =
-                            libav::demux::demux_thd(&segments, &demux_opts, writer).unwrap();
+                        let stats = libav::demux::demux_thd(&segments, writer).unwrap();
                         print_demux_stats(&stats);
                     }
 

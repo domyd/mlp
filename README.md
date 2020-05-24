@@ -91,11 +91,12 @@ cargo build
 
 - [x] Blu-ray playlist support
 - [x] Support all framerates and sample rates
-- [ ] Better console/log output
+- [x] More reliable audio comparison
 - [x] Better/more relevant stats at the end of demuxing
-- [ ] Performance optimization
 - [x] Improve `info` command, support .m2ts files
 - [x] Better CLI help output
+- [ ] Better console/log output
+- [ ] Performance optimization
 - [ ] More tests
 - [ ] Support Linux and macOS
 
