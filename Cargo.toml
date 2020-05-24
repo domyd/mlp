@@ -1,6 +1,6 @@
 [package]
 name = "mlp"
-version = "0.3.0-preview"
+version = "0.3.0"
 authors = ["Dominik Mydlil <dominik.mydlil@outlook.com>"]
 edition = "2018"
 
