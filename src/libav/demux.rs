@@ -4,6 +4,7 @@ use super::{
     ThdOverrun, ThdSegment, VideoMetadata,
 };
 use crate::Segment;
+use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, info, trace, warn};
 use std::io::{Seek, SeekFrom, Write};
 use truehd::ThdMetadata;
@@ -241,6 +242,17 @@ fn write_thd_segment<W: Write + Seek>(
         get_thd_metadata(thd_stream),
     );
 
+    // set up progress bar
+    let start_time = thd_stream.stream.start_time;
+    let duration = thd_stream.stream.duration as u64;
+    let progress = ProgressBar::new(duration);
+    progress.set_draw_delta(duration / 100);
+    progress.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] [{wide_bar}] {eta}")
+            .progress_chars("#>-"),
+    );
+
     debug!("Video: {:?}, Audio: {:?}", video_metadata, thd_metadata);
 
     let (mut num_frames, mut num_video_frames) = (0u32, 0u32);
@@ -252,12 +264,23 @@ fn write_thd_segment<W: Write + Seek>(
     // keeps track of the frame headers of the last group of frames we've written
     let mut frame_queue: Vec<ThdFrameHeader> = Vec::with_capacity(128);
 
+    // keeps track of the progress, for UI purposes
+    let mut prev_pts: i64 = start_time;
+
     while let Ok(packet) = format_context.read_frame() {
         if packet.of_stream(video_stream) {
             // increase video frame counter (which we need in order to calculate
             // the precise video duration)
             num_video_frames += 1;
         } else if packet.of_stream(thd_stream) {
+            // update progress
+            // `set_position` doesn't seem to respect the
+            // draw_delta we set for performance reasons
+            let pts = packet.pkt.pts;
+            let progress_delta = (pts - prev_pts).max(0);
+            progress.inc(progress_delta as u64);
+            prev_pts = pts;
+
             // copy the TrueHD frame to the output
             let pkt_slice = packet.as_slice();
             &thd_writer.write_all(&pkt_slice)?;
@@ -276,6 +299,8 @@ fn write_thd_segment<W: Write + Seek>(
             num_frames += 1;
         }
     }
+
+    progress.finish_and_clear();
 
     trace!(
         "Last group of frames is {} frames long.",
