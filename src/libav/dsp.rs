@@ -50,7 +50,8 @@ pub fn covariance(x: &[i32], y: &[i32]) -> f32 {
         .sum::<f32>()
         / data_len as f32;
 
-    covariance
+    // the value can sometimes be just ever so slightly above 1
+    covariance.min(1.0)
 }
 
 #[cfg(test)]
