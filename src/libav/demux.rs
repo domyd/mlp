@@ -101,7 +101,7 @@ fn adjust_gap(tail: &ThdDecodePacket, head: &ThdDecodePacket, overrun: &ThdOverr
             0
         }
     } else {
-        if covariance > 0.99 {
+        if covariance > 0.95 {
             info!("Deleted frame with duplicate audio content.");
             1
         } else {
