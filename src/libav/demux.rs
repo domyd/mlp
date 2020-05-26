@@ -82,7 +82,7 @@ fn adjust_gap(tail: &ThdDecodePacket, head: &ThdDecodePacket, overrun: &ThdOverr
     let tail_max = tail_samples.iter().map(|n| n.abs()).max().unwrap_or(0);
 
     let covariance = dsp::covariance(&head_samples, &tail_samples);
-    debug!("Frame covariance is {}", covariance);
+    debug!("Frame covariance is {:.7}", covariance);
 
     let adjust = if head_max < silence_threshold && tail_max < silence_threshold {
         // We're dealing with a silent section here, which means the covariance
