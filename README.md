@@ -97,13 +97,11 @@ cargo build
 
 ## TODO list
 
-- [x] Blu-ray playlist support
-- [x] Support all framerates and sample rates
-- [x] More reliable audio comparison
-- [x] Better/more relevant stats at the end of demuxing
-- [x] Improve `info` command, support .m2ts files
-- [x] Better CLI help output
+- [ ] `analyze --fix` command for existing streams
+- [ ] Allow removing dialog normalization
+- [ ] See if we can get rid of the `End of stream indicated.` ffmpeg message when decoding
 - [ ] Better console/log output
+- [ ] Support Linux and macOS
 - [ ] Performance optimization
 - [ ] More tests
 - [ ] Support Linux
