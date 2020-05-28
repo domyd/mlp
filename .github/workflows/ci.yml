@@ -14,38 +14,38 @@ jobs:
     runs-on: [windows-latest]
     steps:
       - uses: actions/checkout@v2
-      - name: Set CFLAGS
-        run: |
-          $cflags = "-I$(Get-Location)\external\ffmpeg\include"
-          echo "::set-env name=CFLAGS::$cflags"
-      - name: Build
-        run: cargo build --verbose
-      - name: Run tests
-        run: cargo test --verbose
+      # - name: Set CFLAGS
+      #   run: |
+      #     $cflags = "-I$(Get-Location)\external\ffmpeg\include"
+      #     echo "::set-env name=CFLAGS::$cflags"
+      # - name: Build
+      #   run: cargo build --verbose
+      # - name: Run tests
+      #   run: cargo test --verbose
       - name: Package
         run: .\scripts\package-win.ps1
-      - uses: actions/upload-artifact@v2
-        with:
-          name: mlp
-          path: '*.zip'
+      # - uses: actions/upload-artifact@v2
+      #   with:
+      #     name: mlp
+      #     path: '*.zip'
 
-  build-macos:
-    runs-on: [macos-latest]
-    steps:
-      - uses: actions/checkout@v2
-      - name: Set CFLAGS
-        run: |
-          export INCLUDE_DIR="-I$PWD/external/ffmpeg/include"
-          echo "::set-env name=CFLAGS::$INCLUDE_DIR"
-      - name: Build
-        run: cargo build --verbose
-      - name: Run tests
-        run: cargo test --verbose
-      - name: Package
-        run: |
-          chmod +x ./scripts/package-macos.sh
-          ./scripts/package-macos.sh
-      - uses: actions/upload-artifact@v2
-        with:
-          name: mlp
-          path: '*.tar.gz'
+  # build-macos:
+  #   runs-on: [macos-latest]
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - name: Set CFLAGS
+  #       run: |
+  #         export INCLUDE_DIR="-I$PWD/external/ffmpeg/include"
+  #         echo "::set-env name=CFLAGS::$INCLUDE_DIR"
+  #     - name: Build
+  #       run: cargo build --verbose
+  #     - name: Run tests
+  #       run: cargo test --verbose
+  #     - name: Package
+  #       run: |
+  #         chmod +x ./scripts/package-macos.sh
+  #         ./scripts/package-macos.sh
+  #     - uses: actions/upload-artifact@v2
+  #       with:
+  #         name: mlp
+  #         path: '*.tar.gz'

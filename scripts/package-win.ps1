@@ -2,6 +2,9 @@ $ffmpegVersion = "4.2.2"
 $ffmpegFile = "ffmpeg-$ffmpegVersion-win64-shared-lgpl"
 $ffmpegUrl = "https://ffmpeg.zeranoe.com/builds/win64/shared/$ffmpegFile.zip"
 
+Write-Host $PSScriptRoot
+exit 0
+
 $dylibs = 
     "avcodec-58.dll",
     "avformat-58.dll",
