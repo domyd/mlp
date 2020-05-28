@@ -16,7 +16,7 @@ log = "0.4.8"
 # clap references 2.3.0, but 2.3.0's doc build is broken
 # https://github.com/dylni/os_str_bytes/issues/2
 os_str_bytes = "2.3.1"
-mpls = { path = "../mpls", version = "0.1.0" }
+mpls = "0.2.0"
 indicatif = "0.14.0"
 
 [build-dependencies]
