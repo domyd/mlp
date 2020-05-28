@@ -23,7 +23,8 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
       - name: Package
-        run: pwsh -File {0}
+        run: .\scripts\package-win.ps1
+        shell: pwsh -File {0}
       - uses: actions/upload-artifact@v2
         with:
           name: mlp
