@@ -2,8 +2,6 @@ $ffmpegVersion = "4.2.2"
 $ffmpegFile = "ffmpeg-$ffmpegVersion-win64-shared-lgpl"
 $ffmpegUrl = "https://ffmpeg.zeranoe.com/builds/win64/shared/$ffmpegFile.zip"
 
-Write-Host "PSScriptRoot: $PSScriptRoot"
-
 $dylibs = 
     "avcodec-58.dll",
     "avformat-58.dll",
@@ -46,7 +44,6 @@ try {
 
     Write-Host "Adding target/release/mlp.exe to archive ..."
     $releaseExe = Join-Path $PSScriptRoot ".." "target" "release" "mlp.exe"
-    Write-Host "releaseExe: $releaseExe"
     if (Test-Path $releaseExe) {
         Copy-Item $releaseExe $releaseDir
     } else {
