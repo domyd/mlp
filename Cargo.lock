@@ -701,7 +701,9 @@ dependencies = [
 
 [[package]]
 name = "mpls"
-version = "0.1.0"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa0668aa1cbb93e0f99875e77e74f757212da8efa56d47f5b8d2256408634746"
 dependencies = [
  "nom 5.1.1",
 ]
