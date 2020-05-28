@@ -1,4 +1,4 @@
-name: Rust
+name: ci
 
 on:
   push:
@@ -18,15 +18,15 @@ jobs:
         run: |
           $cflags = "-I$(Get-Location)\external\ffmpeg\include"
           echo "::set-env name=CFLAGS::$cflags"
-      - name: Build
-        run: cargo build --release --verbose
       - name: Run tests
         run: cargo test --verbose
+      - name: Build
+        run: cargo build --release --verbose
       - name: Package
         run: .\scripts\package-win.ps1
       - uses: actions/upload-artifact@v2
         with:
-          name: mlp
+          name: mlp-windows
           path: '*.zip'
 
   build-macos:
@@ -37,15 +37,15 @@ jobs:
         run: |
           export INCLUDE_DIR="-I$PWD/external/ffmpeg/include"
           echo "::set-env name=CFLAGS::$INCLUDE_DIR"
-      - name: Build
-        run: cargo build --release --verbose
       - name: Run tests
         run: cargo test --verbose
+      - name: Build
+        run: cargo build --release --verbose
       - name: Package
         run: |
           chmod +x ./scripts/package-macos.sh
           ./scripts/package-macos.sh
       - uses: actions/upload-artifact@v2
         with:
-          name: mlp
+          name: mlp-macos
           path: '*.tar.gz'
