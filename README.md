@@ -6,34 +6,34 @@ Dual-licensed under MIT and Apache 2.0.
 
 ## Install
 
-You can download the latest binaries from the [Releases tab](https://github.com/domyd/mlp/releases) of this repository.
+You can download the latest binaries for **macOS** and **Windows** from the [Releases tab](https://github.com/domyd/mlp/releases) of this repository. Requires at least Windows 7 or Mac OS X 10.10.
 
 ## Usage
 
 Demux the TrueHD stream from a given blu-ray playlist file, optionally with the given angle (which starts at 1):
 
 ```powershell
-PS> mlp demux playlist "F:\BDMV\PLAYLIST\00800.mpls" --output "out.thd" --angle 2
+mlp demux playlist "F:\BDMV\PLAYLIST\00800.mpls" --output "out.thd" --angle 2
 ```
 
 Print the segment map and any available angles for the given playlist file:
 
 ```powershell
-PS> mlp demux playlist "F:\BDMV\PLAYLIST\00800.mpls"
+mlp demux playlist "F:\BDMV\PLAYLIST\00800.mpls"
 ```
 
 Demux the TrueHD stream from a list of stream files in the `F:\BDMV\STREAM` directory, and save it to `out.thd`. The files are chosen based either a comma-separated list of numbers or `+`-separated list of file names:
 
 ```powershell
-PS> mlp demux segments -s "F:\BDMV\STREAM" -o "out.thd" -l "55,56"
-PS> mlp demux segments -s "F:\BDMV\STREAM" -o "out.thd" --segment-files "00055.m2ts+00056.m2ts"
+mlp demux segments -s "F:\BDMV\STREAM" -o "out.thd" -l "55,56"
+mlp demux segments -s "F:\BDMV\STREAM" -o "out.thd" --segment-files "00055.m2ts+00056.m2ts"
 ```
 
 Show frame count and duration information of a TrueHD stream:
 
 ```powershell
-PS> mlp info "out.thd"
-PS> mlp info "00055.m2ts"
+mlp info "out.thd"
+mlp info "00055.m2ts"
 ```
 
 All commands support `-v` or `-vv` for more verbose output.
@@ -77,14 +77,19 @@ That's what this tool does in a nutshell. The TL;DR is that it gets rid of dupli
 
 ## Build
 
-Currently building is tested and supported only on Windows. Other platforms soon to follow!
+Tested and supported on macOS and Windows.
 
 You'll need to have the Rust programming language installed.
 
-From the repository root directory, run:
-
+### Windows
 ```powershell
-$env:INCLUDE="$(Get-Location)\external\ffmpeg\include"
+$env:CFLAGS="-I$(Get-Location)\external\ffmpeg\include"
+cargo build
+```
+
+### macOS
+```sh
+export CFLAGS="-I$PWD/external/ffmpeg/include"
 cargo build
 ```
 
@@ -101,7 +106,7 @@ cargo build
 - [ ] Better console/log output
 - [ ] Performance optimization
 - [ ] More tests
-- [ ] Support Linux and macOS
+- [ ] Support Linux
 
 ## Special Thanks
 

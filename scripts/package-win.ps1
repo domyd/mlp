@@ -8,6 +8,7 @@ $dylibs =
     "avutil-56.dll",
     "swresample-3.dll"
 
+# https://github.com/rust-lang/cargo/issues/4082#issuecomment-422507510
 $pkgid = cargo pkgid
 $pkgVersion = ($pkgid -split "#")[1]
 
@@ -42,14 +43,14 @@ try {
     $releaseDir = PrepareFFmpegDylibs
 
     Write-Host "Adding target/release/mlp.exe to archive ..."
-    $releaseExe = Join-Path $PSScriptRoot "target" "release" "mlp.exe"
+    $releaseExe = Join-Path $PSScriptRoot ".." "target" "release" "mlp.exe"
     if (Test-Path $releaseExe) {
         Copy-Item $releaseExe $releaseDir
     } else {
         Write-Error "target/release/mlp.exe not found"
     }
 
-    $zipFileName = "mlp-v$pkgVersion-win64.zip"
+    $zipFileName = "mlp-v$pkgVersion-win-x86_64.zip"
     $zipFile = Join-Path $releaseDir $zipFileName
     
     Write-Host "Compressing package to $zipFile ..."
@@ -58,7 +59,7 @@ try {
     7z a $zipFileName *
     Pop-Location
 
-    Copy-Item $zipFile $PSScriptRoot
+    Copy-Item $zipFile $(Get-Location)
 } finally {
     Remove-Item -Recurse -Force $workspacePath
 }
