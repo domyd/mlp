@@ -22,6 +22,12 @@ jobs:
         run: cargo build --verbose
       - name: Run tests
         run: cargo test --verbose
+      - name: Package
+        run: .\scripts\package-win.ps1
+      - uses: actions/upload-artifact@v2
+        with:
+          name: mlp
+          path: '*.zip'
 
   build-macos:
     runs-on: [macos-latest]
@@ -35,3 +41,11 @@ jobs:
         run: cargo build --verbose
       - name: Run tests
         run: cargo test --verbose
+      - name: Package
+        run: |
+          chmod +x ./scripts/package-macos.sh
+          ./scripts/package-macos.sh
+      - uses: actions/upload-artifact@v2
+        with:
+          name: mlp
+          path: '*.tar.gz'
