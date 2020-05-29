@@ -1,5 +1,7 @@
 # mlp
 
+[![ci](https://github.com/domyd/mlp/workflows/ci/badge.svg?branch=master)](https://github.com/domyd/mlp/actions?query=workflow%3Aci)
+
 A Dolby TrueHD demuxer and utility tool, with a focus on accurately and correctly demuxing a TrueHD stream from a decrypted blu-ray disc.
 
 Dual-licensed under MIT and Apache 2.0.
