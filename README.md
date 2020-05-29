@@ -84,6 +84,9 @@ Tested and supported on macOS and Windows.
 You'll need to have the Rust programming language installed.
 
 ### Windows
+
+Requires Windows 10 version 1803.
+
 ```powershell
 $env:CFLAGS="-I$(Get-Location)\external\ffmpeg\include"
 cargo build
