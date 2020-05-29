@@ -25,7 +25,7 @@ fn main() {
     {
         println!("cargo:rerun-if-changed={}", relative_header_path);
     }
-    
+
     setup(&out_path, ffmpeg_version);
 }
 
@@ -36,10 +36,10 @@ fn setup(out_path: &PathBuf, ffmpeg_version: &str) {
 
     if !is_target_state(&out_path) {
         let ff_dev_dl = download_ffmpeg(&out_path, "dev", ffmpeg_version);
-        let ff_dev = extract_7z(&ff_dev_dl);
+        let ff_dev = extract(&ff_dev_dl);
 
         let ff_shared_dl = download_ffmpeg(&out_path, "shared", ffmpeg_version);
-        let ff_shared = extract_7z(&ff_shared_dl);
+        let ff_shared = extract(&ff_shared_dl);
 
         let bin_src_dir = ff_shared.as_path().join("bin");
         let lib_src_dir = ff_dev.as_path().join("lib");
@@ -71,7 +71,7 @@ fn setup(out_path: &PathBuf, ffmpeg_version: &str) {
 
     if !is_target_state(&out_path) {
         let ff_shared_dl = download_ffmpeg(&out_path, "shared", ffmpeg_version);
-        let ff_shared = extract_7z(&ff_shared_dl);
+        let ff_shared = extract(&ff_shared_dl);
 
         let bin_src_dir = ff_shared.as_path().join("bin");
 
@@ -96,11 +96,15 @@ fn setup(out_path: &PathBuf, ffmpeg_version: &str) {
     for lib in dylibs.iter() {
         // create symlink that doesn't have the version, so ld can find it
         let dylib_path = {
-            let mut p = bin_dir.clone(); p.push(lib); p
+            let mut p = bin_dir.clone();
+            p.push(lib);
+            p
         };
         let symlink_path = {
             let lib_symlink = format!("{}.dylib", lib.split('.').collect::<Vec<&str>>()[0]);
-            let mut p = bin_dir.clone(); p.push(lib_symlink); p
+            let mut p = bin_dir.clone();
+            p.push(lib_symlink);
+            p
         };
         if symlink_path.exists() {
             std::fs::remove_file(&symlink_path).unwrap();
@@ -176,17 +180,15 @@ fn download_ffmpeg(out_dir: &PathBuf, build_type: &str, version: &str) -> PathBu
     dest_path
 }
 
-fn extract_7z(path: &PathBuf) -> PathBuf {
-    get_extract_cmd(path.to_str().unwrap())
-        .current_dir({
-            let mut p = path.clone();
-            p.pop();
-            p
-        })
+fn extract(zip_path: &PathBuf) -> PathBuf {
+    // `tar` is available on Windows since 1803
+    Command::new("tar")
+        .args(&["-xf", zip_path.to_str().unwrap()])
+        .current_dir(zip_path.parent().unwrap())
         .output()
         .expect("failed to extract archive");
 
-    let mut path = path.clone();
+    let mut path = zip_path.clone();
     path.set_extension("");
     path
 }
@@ -199,20 +201,6 @@ fn is_target_state(path: &Path) -> bool {
     } else {
         panic!("OS currently not supported.")
     }
-}
-
-#[cfg(target_os = "macos")]
-fn get_extract_cmd(zip_path: &str) -> Command {
-    let mut cmd = Command::new("tar");
-    cmd.args(&["xzf", zip_path]);
-    cmd
-}
-
-#[cfg(target_os = "windows")]
-fn get_extract_cmd(zip_path: &str) -> Command {
-    let mut cmd = Command::new("7z");
-    cmd.args(&["x", zip_path]);
-    cmd
 }
 
 #[cfg(target_os = "macos")]
