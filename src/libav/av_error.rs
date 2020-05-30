@@ -14,6 +14,7 @@ pub enum DemuxErr {
     NoVideoStreamFound,
     NoTrueHdStreamFound,
     NoTrueHdFramesEncountered,
+    SelectedTrueHdStreamNotFound(i32),
 }
 
 #[derive(Debug)]
@@ -52,14 +53,14 @@ impl Display for AVError {
         match self {
             AVError::IoErr(e) => write!(f, "{}", e),
             AVError::FFMpegErr(i) => write!(f, "ffmpeg error code: {}", i),
-            AVError::DemuxErr(e) => {
-                let msg = match e {
-                    DemuxErr::NoTrueHdStreamFound => "No TrueHD stream found.",
-                    DemuxErr::NoVideoStreamFound => "No video stream found.",
-                    DemuxErr::NoTrueHdFramesEncountered => "No TrueHD frames encountered.",
-                };
-                write!(f, "{}", msg)
-            }
+            AVError::DemuxErr(e) => match e {
+                DemuxErr::NoTrueHdStreamFound => write!(f, "No TrueHD stream found."),
+                DemuxErr::NoVideoStreamFound => write!(f, "No video stream found."),
+                DemuxErr::NoTrueHdFramesEncountered => write!(f, "No TrueHD frames encountered."),
+                DemuxErr::SelectedTrueHdStreamNotFound(i) => {
+                    write!(f, "TrueHD stream with index {} not found.", i)
+                }
+            },
             AVError::OtherErr(e) => {
                 let msg = match e {
                     OtherErr::FilePathIsNotUtf8(path) => {

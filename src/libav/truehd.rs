@@ -147,7 +147,7 @@ impl Display for DecodedThdFrame {
 
 impl Display for ThdMetadata {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "({} Hz, {} ch)", self.sample_rate, self.channels)
+        write!(f, "{} Hz, {} ch", self.sample_rate, self.channels)
     }
 }
 
