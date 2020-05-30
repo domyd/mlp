@@ -21,6 +21,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85bb70cc08ec97ca5450e6eba421deeea5f172c0fc61f78b5357b2a8e8be195f"
+
+[[package]]
 name = "arrayvec"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -686,6 +692,7 @@ dependencies = [
 name = "mlp"
 version = "0.5.0"
 dependencies = [
+ "anyhow",
  "clap 3.0.0-beta.1",
  "crc",
  "ffmpeg4-ffi",
