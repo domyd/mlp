@@ -1,5 +1,5 @@
 use fs_extra;
-use std::fs::{read_dir, remove_dir_all, remove_file, File};
+use std::fs::{read_dir, remove_dir_all};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -7,7 +7,6 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=Cargo.lock");
 
-    let ffmpeg_version = "4.2.2";
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let out_path = PathBuf::from(&out_dir);
@@ -26,33 +25,29 @@ fn main() {
         println!("cargo:rerun-if-changed={}", relative_header_path);
     }
 
-    setup(&out_path, ffmpeg_version);
+    setup(&out_path, &PathBuf::from(&manifest_dir));
 }
 
 #[cfg(target_os = "windows")]
-fn setup(out_path: &PathBuf, ffmpeg_version: &str) {
+fn setup(out_path: &PathBuf, root_dir: &PathBuf) {
     let bin_dir = out_path.as_path().join("bin");
     let lib_dir = out_path.as_path().join("lib");
+    let ffmpeg_bundle = root_dir
+        .join("external")
+        .join("ffmpeg")
+        .join("ffmpeg-4.2.2-win64.zip");
 
     if !is_target_state(&out_path) {
-        let ff_dev_dl = download_ffmpeg(&out_path, "dev", ffmpeg_version);
-        let ff_dev = extract(&ff_dev_dl);
+        let bundle = extract(&ffmpeg_bundle);
 
-        let ff_shared_dl = download_ffmpeg(&out_path, "shared", ffmpeg_version);
-        let ff_shared = extract(&ff_shared_dl);
-
-        let bin_src_dir = ff_shared.as_path().join("bin");
-        let lib_src_dir = ff_dev.as_path().join("lib");
+        let bin_src_dir = bundle.as_path().join("bin");
+        let lib_src_dir = bundle.as_path().join("lib");
 
         copy_dir(&bin_src_dir, &bin_dir);
         copy_dir(&lib_src_dir, &lib_dir);
 
         assert!(is_target_state(&out_path));
-
-        remove_dir_all(&ff_dev).unwrap();
-        remove_dir_all(&ff_shared).unwrap();
-        remove_file(&ff_dev_dl).unwrap();
-        remove_file(&ff_shared_dl).unwrap();
+        remove_dir_all(&bundle).unwrap();
     }
 
     println!(
@@ -66,21 +61,21 @@ fn setup(out_path: &PathBuf, ffmpeg_version: &str) {
 }
 
 #[cfg(target_os = "macos")]
-fn setup(out_path: &PathBuf, ffmpeg_version: &str) {
+fn setup(out_path: &PathBuf, root_dir: &PathBuf) {
     let bin_dir = out_path.as_path().join("bin");
+    let ffmpeg_bundle = root_dir
+        .join("external")
+        .join("ffmpeg")
+        .join("ffmpeg-4.2.2-macos64.zip");
 
     if !is_target_state(&out_path) {
-        let ff_shared_dl = download_ffmpeg(&out_path, "shared", ffmpeg_version);
-        let ff_shared = extract(&ff_shared_dl);
-
-        let bin_src_dir = ff_shared.as_path().join("bin");
+        let bundle = extract(&ffmpeg_bundle);
+        let bin_src_dir = bundle.as_path().join("bin");
 
         copy_dir(&bin_src_dir, &bin_dir);
 
         assert!(is_target_state(&out_path));
-
-        remove_dir_all(&ff_shared).unwrap();
-        remove_file(&ff_shared_dl).unwrap();
+        remove_dir_all(&bundle).unwrap();
     }
 
     let dylibs = vec![
@@ -148,38 +143,6 @@ fn visit_dirs(dir: &Path, entries: &mut Vec<PathBuf>) -> std::io::Result<()> {
     Ok(())
 }
 
-fn download_ffmpeg(out_dir: &PathBuf, build_type: &str, version: &str) -> PathBuf {
-    let platform = get_platform();
-    let url = reqwest::Url::parse(&format!(
-        "https://ffmpeg.zeranoe.com/builds/{p}/{t}/ffmpeg-{v}-{p}-{t}-lgpl.zip",
-        t = build_type,
-        p = platform,
-        v = version
-    ))
-    .unwrap();
-    println!("{}", url);
-
-    let dest_path = {
-        let fname = url
-            .path_segments()
-            .and_then(|segments| segments.last())
-            .and_then(|name| if name.is_empty() { None } else { Some(name) })
-            .unwrap();
-
-        let mut path = out_dir.clone();
-        path.push(fname);
-        path
-    };
-
-    if !dest_path.exists() {
-        let mut response = reqwest::blocking::get(url).unwrap();
-        let mut file = File::create(dest_path.as_path()).unwrap();
-        response.copy_to(&mut file).unwrap();
-    }
-
-    dest_path
-}
-
 fn extract(zip_path: &PathBuf) -> PathBuf {
     // `tar` is available on Windows since 1803
     Command::new("tar")
@@ -201,14 +164,4 @@ fn is_target_state(path: &Path) -> bool {
     } else {
         panic!("OS currently not supported.")
     }
-}
-
-#[cfg(target_os = "macos")]
-fn get_platform() -> &'static str {
-    "macos64"
-}
-
-#[cfg(target_os = "windows")]
-fn get_platform() -> &'static str {
-    "win64"
 }

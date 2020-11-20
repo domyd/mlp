@@ -81,7 +81,7 @@ That's what this tool does in a nutshell. The TL;DR is that it gets rid of dupli
 
 Tested and supported on macOS and Windows.
 
-You'll need to have the Rust programming language installed.
+You'll need to have the Rust programming language installed, as well as the [Git LFS](https://git-lfs.github.com/) extension.
 
 ### Windows
 
