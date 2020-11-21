@@ -1,7 +1,5 @@
-$ffmpegVersion = "4.2.2"
-$ffmpegFile = "ffmpeg-$ffmpegVersion-win64-shared-lgpl"
-$ffmpegUrl = "https://ffmpeg.zeranoe.com/builds/win64/shared/$ffmpegFile.zip"
-
+$ffmpegBundleName = "ffmpeg-4.2.2-win64"
+$ffmpegBundle = Join-Path $PSScriptRoot ".." "external" "ffmpeg" "$ffmpegBundleName.zip"
 $dylibs = 
     "avcodec-58.dll",
     "avformat-58.dll",
@@ -19,27 +17,22 @@ $workspacePath = Join-Path $env:TEMP "mlp.$guid"
 
 function PrepareFFmpegDylibs() {
     New-Item -ItemType Directory -Force -Path $workspacePath | Out-Null
-    $dlPath = Join-Path $workspacePath "ffmpeg.zip"
-
-    Invoke-WebRequest $ffmpegUrl -OutFile $dlPath
-
-    Expand-Archive $dlPath -DestinationPath $workspacePath
-    Remove-Item $dlPath
+    Expand-Archive $ffmpegBundle -DestinationPath $workspacePath
 
     $releaseDir = Join-Path $workspacePath "mlp"
     New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
     
     foreach ($lib in $dylibs) {
-        $libPath = Join-Path $workspacePath $ffmpegFile "bin" $lib
+        $libPath = Join-Path $workspacePath $ffmpegBundleName "bin" $lib
         Copy-Item -Path $libPath -Destination $releaseDir
     }
-    Remove-Item -Force -Recurse (Join-Path $workspacePath $ffmpegFile)
+    Remove-Item -Force -Recurse (Join-Path $workspacePath $ffmpegBundleName)
 
     $releaseDir
 }
 
 try {
-    Write-Host "Downloading and extracting FFmpeg binaries ..."
+    Write-Host "Extracting FFmpeg binaries ..."
     $releaseDir = PrepareFFmpegDylibs
 
     Write-Host "Adding target/release/mlp.exe to archive ..."

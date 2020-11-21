@@ -4,9 +4,7 @@ realpath() {
     [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
 }
 
-ffmpegVersion="4.2.2"
-ffmpegFile="ffmpeg-$ffmpegVersion-macos64-shared-lgpl"
-ffmpegUrl="https://ffmpeg.zeranoe.com/builds/macos64/shared/$ffmpegFile.zip"
+ffmpegBundleName="ffmpeg-4.2.2-macos64"
 scriptDir="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 echo "$scriptDir"
 
@@ -28,16 +26,16 @@ uuid=$(uuidgen)
 
 wsdir="$TMPDIR$uuid"
 mkdir $wsdir && pushd $wsdir
-curl $ffmpegUrl --output "$ffmpegFile.zip"
-tar xzf "$ffmpegFile.zip"
+cp "$scriptDir/../external/ffmpeg/$ffmpegBundleName.zip" .
+tar xzf "$ffmpegBundleName.zip"
 
 for lib in ${dylibs[@]}
 do
-    cp "$ffmpegFile/bin/$lib" .
+    cp "$ffmpegBundleName/bin/$lib" .
 done
 
-rm -rf $ffmpegFile
-rm "$ffmpegFile.zip"
+rm -rf $ffmpegBundleName
+rm "$ffmpegBundleName.zip"
 
 cp "$scriptDir/../target/release/mlp" .
 
