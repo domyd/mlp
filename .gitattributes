@@ -1,0 +1,2 @@
+external/ffmpeg/ffmpeg-4.2.2-win64.zip filter=lfs diff=lfs merge=lfs -text
+external/ffmpeg/ffmpeg-4.2.2-macos64.zip filter=lfs diff=lfs merge=lfs -text
