@@ -4,7 +4,7 @@ realpath() {
     [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
 }
 
-ffmpegBundleName="ffmpeg-4.2.2-macos64.zip"
+ffmpegBundleName="ffmpeg-4.2.2-macos64"
 scriptDir="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 echo "$scriptDir"
 
