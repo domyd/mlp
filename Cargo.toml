@@ -18,6 +18,7 @@ log = "0.4.8"
 os_str_bytes = "2.3.1"
 mpls = "0.2.0"
 indicatif = "0.14.0"
+anyhow = "1.0"
 
 [build-dependencies]
 fs_extra = "1.1.0"

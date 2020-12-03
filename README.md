@@ -12,13 +12,13 @@ You can download the latest binaries for **macOS** and **Windows** from the [Rel
 
 ## Usage
 
-Demux the TrueHD stream from a given blu-ray playlist file, optionally with the given angle (which starts at 1):
+Demux the TrueHD stream from a given blu-ray playlist file:
 
 ```powershell
-mlp demux playlist "F:\BDMV\PLAYLIST\00800.mpls" --output "out.thd" --angle 2
+mlp demux playlist "F:\BDMV\PLAYLIST\00800.mpls" --output "out.thd"
 ```
 
-Print the segment map and any available angles for the given playlist file:
+Print the available TrueHD streams, the segment map, and any available angles for the given playlist file:
 
 ```powershell
 mlp demux playlist "F:\BDMV\PLAYLIST\00800.mpls"
@@ -38,7 +38,23 @@ mlp info "out.thd"
 mlp info "00055.m2ts"
 ```
 
-All commands support `-v` or `-vv` for more verbose output.
+### Additional arguments
+
+If your blu-ray has multiple angles, you must select one with `--angle <index>`. The given `<index>` starts at 1. This only applies to the `demux playlist` command.
+
+```powershell
+mlp demux playlist "F:\BDMV\PLAYLIST\00800.mpls" --output "out.thd" --angle 2
+```
+
+If the selected container format contains multiple TrueHD streams, you must select one with `--stream <index>`. A list of streams is printed at the start, or you can use `ffprobe <m2ts-file>` or `mlp demux playlist <playlist-file>` to see the available streams and their indices. This applies to all commands.
+
+```powershell
+mlp demux playlist "F:\BDMV\PLAYLIST\00800.mpls" --output "out.thd" --stream 1
+mlp demux segments -s "F:\BDMV\STREAM" -o "out.thd" -l "55,56" --stream 2
+mlp info "00055.m2ts" --stream 3
+```
+
+Every command supports `-v` or `-vv` for more verbose output.
 
 ## FAQ
 

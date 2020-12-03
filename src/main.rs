@@ -1,7 +1,8 @@
+use anyhow::Context;
 use clap::{crate_version, App, Arg, ArgGroup, ArgSettings};
-use libav::MediaDuration;
+use libav::{demux::ThdStreamInfo, truehd::ThdMetadata, MediaDuration};
 use log::*;
-use mpls::Mpls;
+use mpls::{Mpls, PlayItem};
 use num_format::{Locale, ToFormattedString};
 use simplelog::*;
 use std::fs::File;
@@ -12,7 +13,7 @@ use std::{
 
 pub mod libav;
 
-fn main() -> std::io::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = App::new("TrueHD Demuxer")
         .version(crate_version!())
         .author("Dominik Mydlil <dominik.mydlil@outlook.com>")
@@ -37,6 +38,17 @@ fn main() -> std::io::Result<()> {
                                 .value_name("OUTPUT")
                                 .takes_value(true)
                                 .required(false),
+                        )
+                        .arg(
+                            Arg::with_name("stream-idx")
+                            .about("Sets the index of the TrueHD stream to demux.")
+                            .long("stream")
+                            .required(false)
+                            .takes_value(true)
+                            .validator(|s| {
+                                s.parse::<i32>()
+                                    .map_err(|_| String::from("Must be a number."))
+                            }),
                         )
                         .arg(
                             Arg::with_name("angle")
@@ -83,6 +95,17 @@ fn main() -> std::io::Result<()> {
                                 .long("stream-dir"),
                         )
                         .arg(
+                            Arg::with_name("stream-idx")
+                            .about("Sets the index of the TrueHD stream to demux.")
+                            .long("stream")
+                            .required(false)
+                            .takes_value(true)
+                            .validator(|s| {
+                                s.parse::<i32>()
+                                    .map_err(|_| String::from("Must be a number."))
+                            }),
+                        )
+                        .arg(
                             Arg::with_name("output")
                                 .about("Sets the output TrueHD file.")
                                 .short('o')
@@ -100,7 +123,18 @@ fn main() -> std::io::Result<()> {
         .subcommand(
             App::new("info")
                 .about("Prints information about the TrueHD stream.")
-                .arg(Arg::with_name("stream").value_name("STREAM").required(true)),
+                .arg(Arg::with_name("stream").value_name("STREAM").required(true))
+                .arg(
+                    Arg::with_name("stream-idx")
+                    .about("Sets the index of the TrueHD stream to demux.")
+                    .long("stream")
+                    .required(false)
+                    .takes_value(true)
+                    .validator(|s| {
+                        s.parse::<i32>()
+                            .map_err(|_| String::from("Must be a number."))
+                    }),
+                ),
         )
         .arg(
             Arg::with_name("verbosity")
@@ -143,10 +177,8 @@ fn main() -> std::io::Result<()> {
         ("demux", Some(sub)) => {
             match sub.subcommand() {
                 ("playlist", Some(sub)) => {
-                    let mpls_path = sub
-                        .value_of("playlist")
-                        .map(|p| PathBuf::from(p))
-                        .expect("invalid MPLS path");
+                    let mpls_path = sub.value_of("playlist").map(|p| PathBuf::from(p)).unwrap();
+
                     // turn angle into a 0-based index internally
                     let user_did_supply_angle = sub.occurrences_of("angle") > 0;
                     let angle_arg = sub
@@ -155,46 +187,68 @@ fn main() -> std::io::Result<()> {
                         .map(|n| n.max(1) - 1)
                         .unwrap();
 
-                    if let Some(output_path) = sub.value_of("output").map(|p| PathBuf::from(p)) {
-                        let segments = {
-                            let file = File::open(&mpls_path)?;
-                            let mpls = Mpls::from(file).expect("failed to parse MPLS file.");
-                            let angles = mpls.angles();
-                            if angles.len() > 1 && !user_did_supply_angle {
-                                warn!("This playlist contains more than one angle, but you did not select an angle with --angle. Using the default angle 1 ...");
+                    let user_stream_idx = sub
+                        .value_of("stream-idx")
+                        .map(|s| s.parse::<i32>().unwrap());
+
+                    let mpls = {
+                        let file = File::open(&mpls_path)?;
+                        let mpls = Mpls::from(file).expect("failed to parse MPLS file.");
+                        mpls
+                    };
+                    let segments = {
+                        let angles = mpls.angles();
+                        if angles.len() > 1 && !user_did_supply_angle {
+                            warn!("This playlist contains more than one angle, but you did not select an angle with --angle. Using the default angle 1 ...");
+                        }
+                        let selected_angle = match angles.get(angle_arg as usize) {
+                            None => {
+                                error!("Angle {} doesn't exist in this playlist.", angle_arg + 1);
+                                return Ok(());
                             }
-                            let selected_angle = match angles.get(angle_arg as usize) {
-                                None => {
-                                    error!(
-                                        "Angle {} doesn't exist in this playlist.",
-                                        angle_arg + 1
-                                    );
-                                    return Ok(());
-                                }
-                                Some(a) => a,
-                            };
+                            Some(a) => a,
+                        };
 
-                            debug!(
-                                "Playlist has {} {}.",
-                                angles.len(),
-                                if angles.len() > 1 { "angles" } else { "angle" }
-                            );
-                            debug!("Using angle {}.", angle_arg + 1);
+                        debug!(
+                            "Playlist has {} {}.",
+                            angles.len(),
+                            if angles.len() > 1 { "angles" } else { "angle" }
+                        );
+                        debug!("Using angle {}.", angle_arg + 1);
 
-                            get_segments(&mpls, &selected_angle, &mpls_path)
+                        get_segments(&mpls, &selected_angle, &mpls_path)
+                    };
+
+                    let thd_streams = libav::demux::thd_streams(&segments[0].path)
+                        .map(|s| thd_streams_with_language(&s, &mpls.play_list.play_items[0]))
+                        .context("Failed at searching for TrueHD streams.")?;
+                    print_thd_stream_list(&thd_streams);
+
+                    if let Some(output_path) = sub.value_of("output").map(|p| PathBuf::from(p)) {
+                        let selected_stream = select_thd_stream(&thd_streams, user_stream_idx)?;
+                        let demux_opts = match selected_stream {
+                            Some(i) => libav::demux::DemuxOptions {
+                                thd_stream_id: Some(i),
+                            },
+                            None => {
+                                return Ok(());
+                            }
                         };
 
                         if let Some(file) =
                             file_create_with_force_check(&output_path, force).transpose()?
                         {
                             let writer = BufWriter::new(file);
-                            let stats = libav::demux::demux_thd(&segments, writer).unwrap();
+                            let stats = libav::demux::demux_thd(&segments, &demux_opts, writer)
+                                .context("Failed demuxing TrueHD stream.")?;
                             print_demux_stats(&stats);
                         }
                     } else {
                         let mpls = {
-                            let f = File::open(&mpls_path)?;
-                            Mpls::from(f).expect("failed to parse MPLS file.")
+                            let f = File::open(&mpls_path).with_context(|| {
+                                format!("Failed to open MPLS file at {}", &mpls_path.display())
+                            })?;
+                            Mpls::from(f)?
                         };
                         print_playlist_info(&mpls);
                     }
@@ -207,6 +261,10 @@ fn main() -> std::io::Result<()> {
                         .value_of("stream-dir")
                         .map(|p| PathBuf::from(p))
                         .unwrap();
+
+                    let user_stream_idx = sub
+                        .value_of("stream-idx")
+                        .map(|s| s.parse::<i32>().unwrap());
 
                     let segments: Vec<Segment> = {
                         if let Some(values) = sub.values_of("segment-list") {
@@ -243,11 +301,25 @@ fn main() -> std::io::Result<()> {
                         }
                     };
 
+                    let thd_streams = libav::demux::thd_streams(&segments[0].path)
+                        .context("Failed at searching for TrueHD streams.")?;
+                    print_thd_stream_list(&thd_streams);
+                    let selected_stream = select_thd_stream(&thd_streams, user_stream_idx)?;
+                    let demux_opts = match selected_stream {
+                        Some(i) => libav::demux::DemuxOptions {
+                            thd_stream_id: Some(i),
+                        },
+                        None => {
+                            return Ok(());
+                        }
+                    };
+
                     if let Some(file) =
                         file_create_with_force_check(&output_path, force).transpose()?
                     {
                         let writer = BufWriter::new(file);
-                        let stats = libav::demux::demux_thd(&segments, writer).unwrap();
+                        let stats = libav::demux::demux_thd(&segments, &demux_opts, writer)
+                            .context("Failed demuxing TrueHD stream.")?;
                         print_demux_stats(&stats);
                     }
 
@@ -258,25 +330,126 @@ fn main() -> std::io::Result<()> {
         }
         ("info", Some(sub)) => {
             let path = sub.value_of("stream").map(|p| PathBuf::from(p)).unwrap();
-            let frame_count = count_thd_frames(&path).unwrap();
-            print_frame_count_info(frame_count);
+            let user_stream_idx = sub
+                .value_of("stream-idx")
+                .map(|s| s.parse::<i32>().unwrap());
+
+            if let Some((a, b, metadata)) = count_thd_frames(&path, user_stream_idx)? {
+                print_frame_count_info((a, b), &metadata);
+            }
+
             Ok(())
         }
         _ => Ok(()),
     }
 }
 
+fn print_thd_stream_list(streams: &[ThdStreamInfo]) {
+    for s in streams {
+        info!("{}", s);
+    }
+}
+
+fn thd_streams_with_language(streams: &[ThdStreamInfo], mpls: &PlayItem) -> Vec<ThdStreamInfo> {
+    let langs = mpls
+        .stream_number_table
+        .primary_audio_streams
+        .iter()
+        .filter_map(|s| {
+            if let Some(lang) = match s.attrs.stream_type {
+                mpls::StreamType::Audio(_, _, ref lang) => Some(lang.clone()),
+                _ => None,
+            } {
+                if let Some(pid) = match s.entry.refs {
+                    mpls::StreamEntryRef::PlayItem(r) => match r {
+                        mpls::Ref::Stream(i) => Some(i.0 as i32),
+                        _ => None,
+                    },
+                    _ => None,
+                } {
+                    return Some((pid, lang));
+                }
+            }
+
+            return None;
+        })
+        .collect::<Vec<(i32, String)>>();
+
+    streams
+        .into_iter()
+        .map(|stream| {
+            if let Some(lang) = langs.iter().find_map(|s| {
+                if s.0 == stream.id {
+                    Some(s.1.clone())
+                } else {
+                    None
+                }
+            }) {
+                ThdStreamInfo {
+                    language: Some(lang),
+                    ..stream.clone()
+                }
+            } else {
+                stream.clone()
+            }
+        })
+        .collect()
+}
+
+fn select_thd_stream(
+    streams: &[libav::demux::ThdStreamInfo],
+    user_select: Option<i32>,
+) -> Result<Option<i32>, libav::AVError> {
+    if streams.len() == 0 {
+        Err(libav::AVError::DemuxErr(
+            libav::DemuxErr::NoTrueHdStreamFound,
+        ))
+    } else if streams.len() == 1 {
+        let s = streams.first().unwrap();
+        if let Some(i) = user_select {
+            if i != s.index {
+                warn!(
+                    "Only one TrueHD stream found with index {}, using that one instead.",
+                    s.index
+                );
+            }
+        }
+        Ok(Some(s.id))
+    } else {
+        if let Some(i) = user_select {
+            if let Some(s) = streams.iter().find(|s| s.index == i) {
+                Ok(Some(s.id))
+            } else {
+                Err(libav::AVError::DemuxErr(
+                    libav::DemuxErr::SelectedTrueHdStreamNotFound(i),
+                ))
+            }
+        } else {
+            warn!(
+                "Found multiple ({}) TrueHD streams. Re-run with --stream <INDEX> to select one.",
+                streams.len()
+            );
+            Ok(None)
+        }
+    }
+}
+
 fn file_create_with_force_check<P: AsRef<Path>>(
     path: P,
     force: bool,
-) -> Option<Result<File, std::io::Error>> {
+) -> Option<anyhow::Result<File>> {
     match (path.as_ref().exists(), force) {
         (true, true) => {
             warn!(
                 "Overwriting existing output file {}.",
                 path.as_ref().display()
             );
-            Some(File::create(&path))
+            Some(File::create(&path).with_context(|| {
+                format!(
+                    "Failed to create output file at {}",
+                    path.as_ref().display()
+                )
+            }))
         }
         (true, false) => {
             warn!(
@@ -285,32 +458,53 @@ fn file_create_with_force_check<P: AsRef<Path>>(
             );
             None
         }
-        (false, _) => Some(File::create(&path)),
+        (false, _) => Some(File::create(&path).with_context(|| {
+            format!(
+                "Failed to create output file at {}",
+                path.as_ref().display()
+            )
+        })),
     }
 }
 
-fn count_thd_frames<P: AsRef<Path>>(filepath: P) -> Result<(i32, i32), libav::AVError> {
-    info!("Counting output file frames ...");
+fn count_thd_frames<P: AsRef<Path>>(
+    filepath: P,
+    stream_idx: Option<i32>,
+) -> anyhow::Result<Option<(i32, i32, ThdMetadata)>> {
+    let thd_streams = libav::demux::thd_streams(&filepath)?;
+    print_thd_stream_list(&thd_streams);
+    if let Some(stream_pid) = select_thd_stream(&thd_streams, stream_idx)? {
+        info!("Counting output file frames ...");
 
-    let mut avctx = libav::AVFormatContext::open(&filepath)?;
-    let streams = avctx.streams()?;
-    let thd_stream = streams
-        .iter()
-        .find(|&s| s.codec.id == ffmpeg4_ffi::sys::AVCodecID_AV_CODEC_ID_TRUEHD)
-        .ok_or(libav::DemuxErr::NoTrueHdStreamFound)?;
+        let mut avctx = libav::AVFormatContext::open(&filepath)?;
+        let streams = avctx.streams()?;
+        let thd_stream = streams
+            .iter()
+            .find(|&s| {
+                s.codec.id == ffmpeg4_ffi::sys::AVCodecID_AV_CODEC_ID_TRUEHD
+                    && s.stream.id == stream_pid
+            })
+            .ok_or(libav::AVError::DemuxErr(
+                libav::DemuxErr::NoTrueHdStreamFound,
+            ))?;
 
-    let (mut num_frames, mut num_major_frames) = (0i32, 0i32);
-    while let Ok(packet) = avctx.read_frame() {
-        if packet.of_stream(&thd_stream) {
-            let frame = libav::ThdFrameHeader::from_bytes(&packet.as_slice()).unwrap();
-            if frame.has_major_sync {
-                num_major_frames += 1;
+        let metadata = libav::demux::get_thd_metadata(&thd_stream);
+
+        let (mut num_frames, mut num_major_frames) = (0i32, 0i32);
+        while let Ok(packet) = avctx.read_frame() {
+            if packet.of_stream(&thd_stream) {
+                let frame = libav::ThdFrameHeader::from_bytes(&packet.as_slice()).unwrap();
+                if frame.has_major_sync {
+                    num_major_frames += 1;
+                }
+                num_frames += 1;
             }
-            num_frames += 1;
         }
-    }
 
-    Ok((num_frames, num_major_frames))
+        Ok(Some((num_frames, num_major_frames, metadata)))
+    } else {
+        Ok(None)
+    }
 }
 
 pub struct Segment {
@@ -402,17 +596,20 @@ fn print_demux_stats(stats: &libav::DemuxStats) {
         match samples_off_target {
             -40..=40 => "(🟢 perfect)",
             -80..=80 => "(🟡 suboptimal)",
-            _ => "(🔴 please file issue)",
+            _ => "(🔴 please file issue at https://github.com/domyd/mlp/issues)",
         }
     );
 }
 
-fn print_frame_count_info(counter: (i32, i32)) {
+fn print_frame_count_info(counter: (i32, i32), metadata: &ThdMetadata) {
     let (num_frames, num_major_frames) = counter;
 
     let duration = (num_frames * 40) as f64 / 48000_f64;
 
-    info!("Assuming 48 KHz sampling frequency and 40 samples per frame.");
+    info!(
+        "Assuming {} Hz sampling frequency and {} samples per frame.",
+        metadata.sample_rate, metadata.frame_size
+    );
     info!(
         "Total MLP frame count: {:>14}",
         num_frames.to_formatted_string(&Locale::en)

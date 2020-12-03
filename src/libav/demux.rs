@@ -6,7 +6,10 @@ use super::{
 use crate::Segment;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, info, trace, warn};
-use std::io::{Seek, SeekFrom, Write};
+use std::{
+    fmt::Display,
+    io::{Seek, SeekFrom, Write}, path::Path,
+};
 use truehd::ThdMetadata;
 
 pub struct SegmentDemuxStats {
@@ -15,6 +18,19 @@ pub struct SegmentDemuxStats {
     pub thd_frames: u32,
     pub thd_frames_original: u32,
     pub thd_metadata: ThdMetadata,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct DemuxOptions {
+    pub thd_stream_id: Option<i32>,
+}
+
+impl Default for DemuxOptions {
+    fn default() -> Self {
+        DemuxOptions {
+            thd_stream_id: None,
+        }
+    }
 }
 
 impl SegmentDemuxStats {
@@ -117,14 +133,64 @@ fn adjust_gap(tail: &ThdDecodePacket, head: &ThdDecodePacket, overrun: &ThdOverr
     adjust
 }
 
+#[derive(Debug, Clone)]
+pub struct ThdStreamInfo {
+    pub index: i32,
+    pub id: i32,
+    pub language: Option<String>,
+    pub metadata: ThdMetadata,
+}
+
+impl Display for ThdStreamInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Stream: index: {}, id: {:#X}, language: {}, {}",
+            self.index,
+            self.id,
+            self.language
+                .as_ref()
+                .map(|s| s.as_ref())
+                .unwrap_or("unknown"),
+            self.metadata,
+        )
+    }
+}
+
+pub fn thd_streams<'a, P: AsRef<Path>>(path: P) -> Result<Vec<ThdStreamInfo>, AVError> {
+    let mut avctx = AVFormatContext::open(&path)?;
+    let streams = avctx.streams()?;
+    let thd_streams: Vec<ThdStreamInfo> = streams
+        .iter()
+        .filter_map(|s| {
+            if s.codec.id == ffmpeg4_ffi::sys::AVCodecID_AV_CODEC_ID_TRUEHD {
+                let metadata = get_thd_metadata(s);
+                Some(ThdStreamInfo {
+                    index: s.stream.index,
+                    id: s.stream.id,
+                    language: None,
+                    metadata,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(thd_streams)
+}
+
 pub fn demux_thd<W: Write + Seek>(
     segments: &[Segment],
+    options: &DemuxOptions,
     mut out_writer: W,
 ) -> Result<DemuxStats, AVError> {
     let mut stats: DemuxStats = DemuxStats {
         segments: Vec::with_capacity(segments.len()),
     };
     let mut previous_segment: Option<ThdSegment> = None;
+
+    debug!("Using demux options: {:?}", options);
 
     let file_count = segments.len();
     for (i, segment) in segments.iter().enumerate() {
@@ -198,7 +264,10 @@ pub fn demux_thd<W: Write + Seek>(
             .ok_or(DemuxErr::NoVideoStreamFound)?;
         let thd_stream = streams
             .iter()
-            .find(|&s| s.codec.id == ffmpeg4_ffi::sys::AVCodecID_AV_CODEC_ID_TRUEHD)
+            .find(|&s| {
+                s.codec.id == ffmpeg4_ffi::sys::AVCodecID_AV_CODEC_ID_TRUEHD
+                    && options.thd_stream_id.map_or(true, |i| s.stream.id == i)
+            })
             .ok_or(DemuxErr::NoTrueHdStreamFound)?;
 
         let segment = write_thd_segment(
@@ -408,7 +477,7 @@ fn get_video_metadata(video_stream: &AVStream) -> VideoMetadata {
     }
 }
 
-fn get_thd_metadata(thd_stream: &AVStream) -> ThdMetadata {
+pub fn get_thd_metadata(thd_stream: &AVStream) -> ThdMetadata {
     let sample_rate = thd_stream.codec_params.sample_rate as u32;
     let frame_size = (sample_rate / 1200) as u8;
     let channels = thd_stream.codec_params.channels as u8;
