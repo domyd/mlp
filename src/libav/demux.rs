@@ -245,7 +245,7 @@ pub fn demux_thd<W: Write + Seek>(
             if n_delete > 0 {
                 // delete the most recently written frame by moving the file
                 // cursor back
-                &out_writer
+                let _ = &out_writer
                     .seek(SeekFrom::Current(-(tail_header.length as i64)))
                     .unwrap();
                 let mut prev_stats = stats.segments.last_mut().unwrap();
@@ -352,7 +352,7 @@ fn write_thd_segment<W: Write + Seek>(
 
             // copy the TrueHD frame to the output
             let pkt_slice = packet.as_slice();
-            &thd_writer.write_all(&pkt_slice)?;
+            let _ = &thd_writer.write_all(&pkt_slice)?;
 
             // push frame header to queue (we want to remember the last
             // n frame headers we saw)
