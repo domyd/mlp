@@ -49,7 +49,7 @@ try {
     Write-Host "Compressing package to $zipFile ..."
 
     Push-Location $releaseDir
-    7z a $zipFileName *
+    Compress-Archive -Path ".\\*" -DestinationPath $zipFileName
     Pop-Location
 
     Copy-Item $zipFile $(Get-Location)
