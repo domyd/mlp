@@ -213,11 +213,11 @@ pub fn demux_thd<W: Write + Seek>(
                 // open the current segment and decode only the first TrueHD frame
                 let mut avctx = AVFormatContext::open(&segment.path)?;
                 let streams = avctx.streams()?;
-                let thd_stream = streams
+                let decoded_head_frame = streams
                     .iter()
                     .find(|&s| s.codec.id == ffmpeg4_ffi::sys::AVCodecID_AV_CODEC_ID_TRUEHD)
-                    .unwrap();
-                match decode_head_frame(&mut avctx, thd_stream)? {
+                    .and_then(|thd_stream| decode_head_frame(&mut avctx, thd_stream).ok()?);
+                match decoded_head_frame {
                     Some(decoded_frame) => decoded_frame,
                     None => {
                         warn!(
