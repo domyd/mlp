@@ -10,6 +10,10 @@ Dual-licensed under MIT and Apache 2.0.
 
 You can download the latest binaries for **macOS** and **Windows** from the [Releases tab](https://github.com/domyd/mlp/releases) of this repository. Requires at least Windows 7 or Mac OS X 10.10.
 
+## Notes for MakeMKV users
+
+MakeMKV 1.15.4 and newer uses the same method for joining TrueHD streams, and should produce flawless TrueHD streams as well.
+
 ## Usage
 
 Demux the TrueHD stream from a given blu-ray playlist file:
@@ -61,6 +65,8 @@ Every command supports `-v` or `-vv` for more verbose output.
 ### Aren't there already other demuxing tools out there?
 
 Absolutely. However, all of them fail in [different](https://www.makemkv.com/forum/viewtopic.php?f=6&t=21513&p=84453#p84453) [ways](http://rationalqm.us/board/viewtopic.php?p=10841#p10841) on TrueHD streams, especially on discs that contain a large number of segments, which has resulted in desync and noticeable audio artifacts. This tool aims to be a perfectly accurate TrueHD demuxer that doesn't produce invalid, broken, or out-of-sync streams.
+
+Notably, however, MakeMKV 1.15.4 and newer joins TrueHD streams flawlessly as well.
 
 ### What does this tool do differently?
 
